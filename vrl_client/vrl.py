@@ -18,10 +18,11 @@ vrl.py - Головний файл для запуску VRL Client
     2. Завантаження конфігурації (initialization.load_config)
     3. Ініціалізація БД (initialization.init_database)
     4. Синхронізація часу (time_sync.sync_system_time)
-    5. Запуск декодера (decoder.start_decoder)
-    6. Очікування TCP підключення (tcp_connection.wait_for_decoder_connection)
-    7. Запуск ping loop (ping_handler.ping_loop) - в фоні
-    8. Запуск parser, analyser, sender - в фоні
+    5. Конфігурація декодера (initialization.update_decoder_ini)
+    6. Запуск декодера (decoder.start_decoder)
+    7. Очікування TCP підключення (tcp_connection.wait_for_decoder_connection)
+    8. Запуск ping loop (ping_handler.ping_loop) - в фоні
+    9. Запуск parser, analyser, sender - в фоні
 """
 
 import sys
@@ -31,7 +32,7 @@ import asyncio
 from pathlib import Path
 
 # Імпортуємо всі модулі
-from initialization import check_dependencies, load_config, init_database, log_to_db
+from initialization import check_dependencies, load_config, init_database, log_to_db, update_decoder_ini
 from time_sync import sync_system_time
 from decoder import start_decoder, stop_decoder
 from tcp_connection import wait_for_decoder_connection
@@ -143,6 +144,11 @@ async def main():
     # ЕТАП 3: Синхронізація часу
     # ========================================
     time_synced, time_message = sync_system_time(config)
+    
+    # ========================================
+    # ЕТАП 3.5: Конфігурація декодера
+    # ========================================
+    update_decoder_ini(config)
     
     # ========================================
     # ЕТАП 4: Запуск декодера

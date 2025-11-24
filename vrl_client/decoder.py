@@ -34,7 +34,7 @@ def start_decoder(config, db_file):
         - Завершує програму якщо помилка
     """
     logger.info("═" * 60)
-    logger.info("ЕТАП 3: ЗАПУСК ДЕКОДЕРА")
+    logger.info("ЕТАП: ЗАПУСК ДЕКОДЕРА")
     logger.info("═" * 60)
     
     executable = config['decoder']['executable']

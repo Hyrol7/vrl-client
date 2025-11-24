@@ -28,7 +28,8 @@ DEFAULT_CONFIG = {
         'timezone': 'Europe/Kiev',
     },
     'decoder': {
-        'executable': '/uvd_rtl.exe',
+        'path': 'C:\\Users\\User\\Downloads\\rtluvd\\',
+        'app_decoder': 'uvd_rtl.exe',
         'command_args': '/tcp',
         'host': '127.0.0.1',
         'port': 31003,
@@ -277,8 +278,102 @@ def init_database(config):
 # ============================================================
 # ЛОГУВАННЯ В БД
 # ============================================================
+# КОНФІГУРАЦІЯ ДЕКОДЕРА
+# ============================================================
 
-def log_to_db(db_file, level, component, message, details=None):
+def update_decoder_ini(config):
+    """
+    Оновлюємо файл rtluvd.ini перед запуском декодера
+    
+    Змінюємо:
+        - avr=1 (Встановлюємо режим AVR)
+        - lastdir=... (Вказуємо шлях до папки декодера)
+    
+    ПАРАМЕТРИ:
+        - config: конфігурація проекту
+    
+    ПОВЕРТАЄ:
+        - True/False: успіх операції
+    """
+    logger.info("═" * 60)
+    logger.info("ЕТАП: КОНФІГУРАЦІЯ ДЕКОДЕРА")
+    logger.info("═" * 60)
+    
+    try:
+        decoder_path = config['decoder']['path']
+        decoder_dir = Path(decoder_path)
+        
+        # Шукаємо rtluvd.ini в папці декодера
+        ini_file = decoder_dir / 'rtluvd.ini'
+        
+        if not ini_file.exists():
+            logger.warning(f"  ⚠ Файл не знайдена: {ini_file}")
+            logger.warning(f"     Ініціалізація декодера буде пропущена")
+            logger.info()
+            return False
+        
+        logger.info(f"  → Оновлюємо rtluvd.ini...")
+        
+        # Читаємо ini файл
+        with open(ini_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        
+        # Оновлюємо параметри
+        updated = False
+        
+        for i, line in enumerate(lines):
+            # Оновлюємо 3k1=1
+            if line.strip().startswith('3k1='):
+                if not line.strip().endswith('1'):
+                    lines[i] = '3k1=1\n'
+                    logger.info(f"     • 3k1 → 1")
+                    updated = True
+            # Оновлюємо 3k2=1
+            if line.strip().startswith('3k2='):
+                if not line.strip().endswith('1'):
+                    lines[i] = '3k2=1\n'
+                    logger.info(f"     • 3k2 → 1")
+                    updated = True
+            # Оновлюємо avr=1
+            if line.strip().startswith('avr='):
+                if not line.strip().endswith('1'):
+                    lines[i] = 'avr=1\n'
+                    logger.info(f"     • avr → 1")
+                    updated = True
+            
+            # Оновлюємо lastdir
+            elif line.strip().startswith('lastdir='):
+                # Перетворюємо шлях у Windows формат (якщо потрібно)
+                # rtluvd.ini очікує Windows шлях з backslash
+                windows_path = decoder_path.replace('/', '\\')
+                if not windows_path.endswith('\\'):
+                    windows_path += '\\'
+                
+                new_line = f'lastdir={windows_path}\n'
+                if lines[i] != new_line:
+                    lines[i] = new_line
+                    logger.info(f"     • lastdir → {windows_path}")
+                    updated = True
+        
+        # Записуємо назад в файл (тільки якщо були зміни)
+        if updated:
+            with open(ini_file, 'w', encoding='utf-8') as f:
+                f.writelines(lines)
+            logger.info(f"  ✓ rtluvd.ini оновлена успішно")
+        else:
+            logger.info(f"  ✓ rtluvd.ini вже актуальна")
+        
+        logger.info()
+        return True
+    
+    except Exception as e:
+        logger.error(f"  ❌ ПОМИЛКА при оновленні rtluvd.ini: {e}\n")
+        return False
+
+
+# ============================================================
+# ЛОГУВАННЯ В БД
+# ============================================================
     """
     Записуємо лог в БД
     
