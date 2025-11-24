@@ -28,7 +28,7 @@ DEFAULT_CONFIG = {
         'timezone': 'Europe/Kiev',
     },
     'decoder': {
-        'executable': '/path/to/uvd_rtl.exe',
+        'executable': '/uvd_rtl.exe',
         'command_args': '/tcp',
         'host': '127.0.0.1',
         'port': 31003,
@@ -36,8 +36,8 @@ DEFAULT_CONFIG = {
         'reconnect_delay': 5,
     },
     'api': {
-        'url': 'https://skybind.pp.ua/vrl_api/ingest.php',
-        'status_url': 'https://skybind.pp.ua/vrl_api/status.php',
+        'url': 'https://yourdomain/api.php',
+        'status_url': 'https://yourdomain/status.php',
         'client_id': 1,
         'secret_key': 'your-secret-key-here',
         'bearer_token': 'your-bearer-token-here',
@@ -72,25 +72,8 @@ CREATE TABLE IF NOT EXISTS packets_raw (
     alarm INTEGER DEFAULT 0,
     faithfulness INTEGER,
     sent INTEGER DEFAULT 0,
-    bound_to_track INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS flight_tracks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    k1_packet_id INTEGER NOT NULL,
-    k2_packet_id INTEGER NOT NULL,
-    callsign TEXT NOT NULL,
-    height INTEGER,
-    fuel INTEGER,
-    timestamp TEXT,
-    sent INTEGER DEFAULT 0,
-    sent_at TEXT,
-    error TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (k1_packet_id) REFERENCES packets_raw(id),
-    FOREIGN KEY (k2_packet_id) REFERENCES packets_raw(id)
 );
 
 CREATE TABLE IF NOT EXISTS logs (
@@ -112,7 +95,6 @@ REQUIRED_LIBS = {
     'yaml': 'PyYAML',
     'requests': 'requests',
 }
-
 OPTIONAL_LIBS = {
     'ntplib': 'ntplib (для точної синхронізації часу)',
 }
@@ -127,7 +109,7 @@ def check_dependencies():
         - Завершує програму при критичній помилці
     """
     logger.info("═" * 60)
-    logger.info("ЕТАП 0: ПЕРЕВІРКА ЗАЛЕЖНОСТЕЙ")
+    logger.info("ЕТАП: ПЕРЕВІРКА ЗАЛЕЖНОСТЕЙ")
     logger.info("═" * 60)
     
     logger.info("\n📦 ОБОВ'ЯЗКОВІ ЗАЛЕЖНОСТІ:")
@@ -171,7 +153,7 @@ def load_config():
         - Завершує програму якщо помилка
     """
     logger.info("═" * 60)
-    logger.info("ЕТАП 1: ЗАВАНТАЖЕННЯ КОНФІГУРАЦІЇ")
+    logger.info("ЕТАП: ЗАВАНТАЖЕННЯ КОНФІГУРАЦІЇ")
     logger.info("═" * 60)
     
     import yaml
@@ -188,9 +170,6 @@ def load_config():
                 yaml.dump(DEFAULT_CONFIG, f, allow_unicode=True, default_flow_style=False)
             logger.info(f"  ✓ config.yaml створена за адресою: {config_file}")
             logger.info(f"\n  ⚠ УВАГА: Відредагуйте config.yaml перед повторним запуском!")
-            logger.info(f"     Особливо потрібно встановити:")
-            logger.info(f"       • decoder.executable")
-            logger.info(f"       • api.client_id, api.secret_key, api.bearer_token\n")
             sys.exit(0)
         except Exception as e:
             logger.error(f"  ❌ ПОМИЛКА при створенні config.yaml: {e}\n")
@@ -239,7 +218,7 @@ def init_database(config):
         - Завершує програму якщо помилка
     """
     logger.info("═" * 60)
-    logger.info("ЕТАП 2: ІНІЦІАЛІЗАЦІЯ БАЗИ ДАНИХ")
+    logger.info("ЕТАП: ІНІЦІАЛІЗАЦІЯ БАЗИ ДАНИХ")
     logger.info("═" * 60)
     
     db_file = Path(__file__).parent / config['database']['file']

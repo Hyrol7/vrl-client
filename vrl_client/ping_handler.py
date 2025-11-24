@@ -138,8 +138,14 @@ def send_status_ping(ping_status, db_file):
             log_to_db(db_file, 'WARNING', 'PING', 'Неочікувана відповідь API', f"Status: {response.status_code}")
             return False
     
+    except requests.ConnectionError as e:
+        logger.warning(f"⚠ PING: Помилка з'єднання (інтернет недоступний): {type(e).__name__}")
+        return False
+    except requests.Timeout as e:
+        logger.warning(f"⚠ PING: Timeout при з'єднанні з API")
+        return False
     except Exception as e:
-        logger.debug(f"⚠ Помилка при відправці ping: {e}")
+        logger.warning(f"⚠ PING: Непередбачена помилка: {e}")
         return False
 
 
@@ -147,20 +153,37 @@ async def ping_loop(ping_status, db_file):
     """
     Периодично відправляємо статус на API сервер (нескінченний цикл)
     
+    При помилці не падає в аварію, а чекає наступного циклу.
+    
     ПАРАМЕТРИ:
         - ping_status: об'єкт PingStatus
         - db_file: шлях до БД (для логування)
     
     ПОВЕРТАЄ:
-        - Нікогда (нескінченний цикл, поки програма працює)
+        - Ніколи (нескінченний цикл, поки програма працює)
     """
     ping_interval = ping_status.config['api'].get('ping_interval', 30)
+    failed_count = 0
     
-    logger.info(f"🔄 Ping loop запущений (інтервал: {ping_interval}с)")
+    logger.info(f"[PING] Запущений цикл (інтервал: {ping_interval}с)")
     
     while True:
         try:
             await asyncio.sleep(ping_interval)
-            send_status_ping(ping_status, db_file)
+            
+            # Спробуємо надіслати ping
+            success = send_status_ping(ping_status, db_file)
+            
+            if success:
+                failed_count = 0  # Скидаємо лічильник при успіху
+            else:
+                failed_count += 1
+                if failed_count % 5 == 0:  # Логуємо кожні 5 невдач
+                    logger.warning(f"[PING] {failed_count} неудалих спроб надіслати статус")
+        
+        except KeyboardInterrupt:
+            logger.info("[PING] Цикл зупинений")
+            break
+        
         except Exception as e:
-            logger.debug(f"⚠ Помилка в ping loop: {e}")
+            logger.error(f"[PING] Критична помилка в циклі: {e}")

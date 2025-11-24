@@ -232,10 +232,19 @@ async def send_tracks_to_api(config: Dict, db_file: str, tracks: List[Dict]) -> 
             
             return False
     
+    except requests.ConnectionError as e:
+        logger.warning(f"[SENDER] Помилка з'єднання (інтернет недоступний): {type(e).__name__}")
+        log_to_db(db_file, 'WARNING', 'SENDER', 'Помилка з\'єднання', f"Інтернет недоступний")
+        return False
+    
+    except requests.Timeout as e:
+        logger.warning(f"[SENDER] Timeout при з'єднанні з API")
+        log_to_db(db_file, 'WARNING', 'SENDER', 'Timeout', f"Сервер не відповідає")
+        return False
+    
     except Exception as e:
-        logger.error(f"[SENDER] Помилка при відправці: {e}")
-        log_to_db(db_file, 'ERROR', 'SENDER', 'Помилка відправки', str(e))
-        
+        logger.warning(f"[SENDER] Непередбачена помилка: {e}")
+        log_to_db(db_file, 'WARNING', 'SENDER', 'Помилка відправки', str(e)[:200])
         return False
 
 
@@ -243,12 +252,15 @@ async def sender_loop(config: Dict, db_file: str):
     """
     Головний цикл sender
     
+    При помилці не падає в аварію, а чекає наступного циклу.
+    Дані залишаються в БД до успішної відправки.
+    
     Логіка:
-    1. Отримуємо batch flight_tracks (sent = 0)
-    2. Відправляємо на API
+    1. Отримуємо batch пакетів з sent = 0
+    2. Спробуємо надіслати на API
     3. При успіху позначаємо sent = 1
-    4. При помилці - повторна спроба (MAX_RETRIES разів)
-    5. Після MAX_RETRIES - позначаємо sent = -1 (помилка)
+    4. При помилці (інтернет, timeout, API) залишаємо sent = 0 та продовжуємо
+    5. Чекаємо наступного циклу
     """
     
     logger.info("[SENDER] Запуск sender...")
@@ -258,32 +270,38 @@ async def sender_loop(config: Dict, db_file: str):
     batch_size = config['cycles'].get('batch_size', BATCH_SIZE)
     
     total_sent = 0
-    retry_queue = {}  # track_id → retry_count
+    failed_count = 0
     
     while True:
         try:
-            # Отримуємо pending tracks
+            # Отримуємо pending пакети
             tracks = get_pending_tracks(db_file, batch_size)
             
             if not tracks:
                 await asyncio.sleep(sender_interval)
                 continue
             
-            # Відправляємо batch
+            # Спробуємо надіслати batch
             success = await send_tracks_to_api(config, db_file, tracks)
             
             if success:
                 total_sent += len(tracks)
+                failed_count = 0  # Скидаємо лічильник при успіху
                 logger.info(f"[SENDER] Статистика: всього надіслано {total_sent} tracks")
+            else:
+                failed_count += 1
+                if failed_count % 5 == 0:  # Логуємо кожні 5 невдач
+                    logger.warning(f"[SENDER] {failed_count} неудалих спроб — дані збережені в БД")
             
             await asyncio.sleep(sender_interval)
         
         except KeyboardInterrupt:
+            logger.info("[SENDER] Цикл зупинений")
             break
         
         except Exception as e:
-            logger.error(f"[SENDER] Критична помилка: {e}")
-            log_to_db(db_file, 'ERROR', 'SENDER', 'Критична помилка', str(e))
+            logger.error(f"[SENDER] Критична помилка в циклі: {e}")
+            log_to_db(db_file, 'ERROR', 'SENDER', 'Критична помилка циклу', str(e)[:200])
             await asyncio.sleep(sender_interval)
     
     logger.info("[SENDER] Sender зупинений")
