@@ -36,6 +36,9 @@ from time_sync import sync_system_time
 from decoder import start_decoder, stop_decoder
 from tcp_connection import wait_for_decoder_connection
 from ping_handler import PingStatus, ping_loop
+from parser import parser_loop
+from analyser import analyser_loop
+from sender import sender_loop
 
 # ============================================================
 # ЛОГУВАННЯ
@@ -191,7 +194,7 @@ async def main():
     logger.info("═" * 60 + "\n")
     
     # ========================================
-    # ЕТАП 6: Запуск ping loop (фоні)
+    # ЕТАП 6: Запуск фонових процесів
     # ========================================
     
     app_state.ping_status = PingStatus(config)
@@ -203,11 +206,16 @@ async def main():
     app_state.ping_status.stages['decoder'] = True
     app_state.ping_status.stages['tcp_connection'] = True
     
-    # Запускаємо ping loop в фоні
-    ping_task = asyncio.create_task(ping_loop(app_state.ping_status, db_file))
+    # Створюємо всі фонові завдання
+    tasks = [
+        asyncio.create_task(ping_loop(app_state.ping_status, db_file)),
+        asyncio.create_task(parser_loop(config, db_file)),
+        asyncio.create_task(analyser_loop(config, db_file)),
+        asyncio.create_task(sender_loop(config, db_file)),
+    ]
     
     try:
-        await ping_task
+        await asyncio.gather(*tasks)
     except KeyboardInterrupt:
         pass
 

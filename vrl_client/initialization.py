@@ -53,6 +53,7 @@ DEFAULT_CONFIG = {
         'sender_interval': 10,     # сек
         'connectivity_check': 5,   # сек
         'ntp_sync_interval': 3600, # 1 час
+        'batch_size': 1000,        # максимум записів за раз
     },
 }
 
@@ -71,8 +72,25 @@ CREATE TABLE IF NOT EXISTS packets_raw (
     alarm INTEGER DEFAULT 0,
     faithfulness INTEGER,
     sent INTEGER DEFAULT 0,
+    bound_to_track INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS flight_tracks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    k1_packet_id INTEGER NOT NULL,
+    k2_packet_id INTEGER NOT NULL,
+    callsign TEXT NOT NULL,
+    height INTEGER,
+    fuel INTEGER,
+    timestamp TEXT,
+    sent INTEGER DEFAULT 0,
+    sent_at TEXT,
+    error TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (k1_packet_id) REFERENCES packets_raw(id),
+    FOREIGN KEY (k2_packet_id) REFERENCES packets_raw(id)
 );
 
 CREATE TABLE IF NOT EXISTS logs (
