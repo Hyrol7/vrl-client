@@ -28,13 +28,13 @@ DEFAULT_CONFIG = {
         'timezone': 'Europe/Kiev',
     },
     'decoder': {
-        'path': 'C:\\Users\\User\\Downloads\\rtluvd\\',
-        'app_decoder': 'uvd_rtl.exe',
-        'command_args': '/tcp',
-        'host': '127.0.0.1',
-        'port': 31003,
-        'timeout': 10,
-        'reconnect_delay': 5,
+        'path': 'C:\\Users\\User\\Downloads\\rtluvd\\', # шлях до директорії з програмою
+        'app_decoder': 'uvd_rtl.exe',   # назва файлк програми
+        'command_args': '/tcp',         # аргументи запуску програми
+        'host': '127.0.0.1',            # хост, в рядку стану
+        'port': 31003,                  # порт, в рядку стану
+        'timeout': 5,                   # час очікування відповіді під час підключення
+        'reconnect_delay': 2,           # час очікування перед повторною спробою підключення
     },
     'api': {
         'url': 'https://yourdomain/api.php',
@@ -49,12 +49,10 @@ DEFAULT_CONFIG = {
         'file': 'base.db',
     },
     'cycles': {
-        'parser_interval': 0.1,    # сек
-        'analyser_interval': 5,    # сек
-        'sender_interval': 10,     # сек
-        'connectivity_check': 5,   # сек
-        'ntp_sync_interval': 3600, # 1 час
-        'batch_size': 1000,        # максимум записів за раз
+        'parser_buffer_interval': 1,   # сек - накопичення пакетів перед записом в БД
+        'analyser_interval': 5,        # сек - обробка K1↔K2 пакетів
+        'sender_interval': 10,         # сек - відправка на API
+        'batch_size': 1000,            # максимум записів за раз
     },
 }
 
@@ -374,6 +372,8 @@ def update_decoder_ini(config):
 # ============================================================
 # ЛОГУВАННЯ В БД
 # ============================================================
+
+def log_to_db(db_file, level, component, message, details=None):
     """
     Записуємо лог в БД
     

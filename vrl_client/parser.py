@@ -160,6 +160,61 @@ def save_packet_to_db(db_file, packet):
         return False
 
 
+async def flush_packets(db_file, packets_buffer, total_packets):
+    """
+    Записуємо накопичені пакети в БД
+    
+    ПАРАМЕТРИ:
+        - db_file: шлях до БД
+        - packets_buffer: список накопичених пакетів
+        - total_packets: поточна кількість записаних пакетів
+    
+    ПОВЕРТАЄ:
+        - total_packets: оновлена кількість записаних пакетів
+    """
+    if not packets_buffer:
+        return total_packets
+    
+    try:
+        conn = sqlite3.connect(db_file)
+        cursor = conn.cursor()
+        
+        # Записуємо усі пакети з буфера в БД
+        for packet in packets_buffer:
+            cursor.execute(
+                """INSERT INTO packets_raw 
+                   (event_time, type, callsign, height, fuel, alarm, faithfulness)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    packet['event_time'],
+                    packet['type'],
+                    packet['callsign'],
+                    packet['height'],
+                    packet['fuel'],
+                    packet['alarm'],
+                    packet['faithfulness'],
+                )
+            )
+        
+        conn.commit()
+        conn.close()
+        
+        packets_count = len(packets_buffer)
+        total_packets += packets_count
+        
+        # Логування тільки кожних 100 пакетів
+        if total_packets % 100 == 0:
+            logger.info(f"[PARSER] ✓ Оброблено {total_packets} пакетів")
+        
+        return total_packets
+    
+    except Exception as e:
+        log_to_db(db_file, 'ERROR', 'PARSER', 'Помилка запису буфера', str(e)[:200])
+        # ⚠️ ВАЖЛИВО: буфер НЕ очищується при помилці!
+        # Повинна повертатися та спробуватися записати наступний раз
+        return total_packets
+
+
 async def connect_to_decoder(config):
     """Підключаємось до TCP-порту декодера"""
     host = config['decoder']['host']
@@ -180,88 +235,155 @@ async def connect_to_decoder(config):
 
 
 async def parser_loop(config, db_file):
-    """Головний цикл парсера"""
+    """
+    Головний цикл парсера
+    
+    Логіка:
+    1. Підключаємось до декодера
+    2. Постійно очікуємо дані (без затримок)
+    3. Накопичуємо пакети в буфер протягом parser_buffer_interval сек
+    4. Через визначений інтервал записуємо накопичені пакети в БД
+    5. При розриві з'єднання — перепідключаємось з визначеним інтервалом
+    6. Записуємо тільки ті стрічки, які починаються на K1 або K2
+    """
     logger.info("[PARSER] Запуск парсера...")
     log_to_db(db_file, 'INFO', 'PARSER', 'Парсер запущений')
     
-    reconnect_delay = config['decoder']['reconnect_delay']
-    parser_interval = config['cycles']['parser_interval']
+    # Валідація конфігурації з дефолтними значеннями
+    DEFAULT_DECODER = {
+        'host': '127.0.0.1',
+        'port': 31003,
+        'timeout': 5,
+        'reconnect_delay': 2,
+    }
+    DEFAULT_CYCLES = {
+        'parser_buffer_interval': 1,
+    }
+    
+    decoder_config = config.get('decoder', {})
+    cycles_config = config.get('cycles', {})
+    
+    reconnect_delay = decoder_config.get('reconnect_delay', DEFAULT_DECODER['reconnect_delay'])
+    buffer_interval = cycles_config.get('parser_buffer_interval', DEFAULT_CYCLES['parser_buffer_interval'])
     
     reader, writer = None, None
-    packet_buffer = ""
-    packets_count = 0
+    text_buffer = ""  # Буфер для накопичення текстових даних
+    packets_buffer = []  # Буфер для накопичених пакетів перед записом в БД
+    last_flush_time = asyncio.get_event_loop().time()
+    total_packets = 0
+    connected = False
     
     while True:
         try:
             # Якщо з'єднання розірване - переподключаємось
             if reader is None:
-                logger.info("[PARSER] Спроба переподключення...")
-                reader, writer = await connect_to_decoder(config)
-                if reader is None:
-                    await asyncio.sleep(reconnect_delay)
-                    continue
+                if connected:
+                    logger.warning("[PARSER] З'єднання розірвано! Перепідключаємся...")
+                    log_to_db(db_file, 'WARNING', 'PARSER', 'З\'єднання розірвано')
+                    connected = False
                 
-                log_to_db(db_file, 'INFO', 'PARSER', 'Переподключено до декодера')
+                logger.info(f"[PARSER] Спроба переподключення (затримка {reconnect_delay}s)...")
+                await asyncio.sleep(reconnect_delay)
+                
+                reader, writer = await connect_to_decoder(config)
+                
+                if reader is not None:
+                    logger.info("[PARSER] ✓ Підключено до декодера")
+                    log_to_db(db_file, 'INFO', 'PARSER', 'Підключено до декодера')
+                    connected = True
+                    text_buffer = ""
+                    last_flush_time = asyncio.get_event_loop().time()
+                    continue
+                else:
+                    logger.warning("[PARSER] Не вдалось підключитись, спробуємо знову...")
+                    continue
             
-            # Читаємо дані з декодера
+            # Постійно очікуємо дані (БЕЗ timeout, БЕЗ затримок)
             try:
-                data = await asyncio.wait_for(
-                    reader.read(4096),
-                    timeout=config['decoder']['timeout']
-                )
+                data = await reader.read(4096)
                 
                 if not data:
-                    logger.warning("[PARSER] З'єднання закрито декодером")
+                    # Дані пусті - декодер закрив з'єднання
+                    logger.warning("[PARSER] Декодер закрив з'єднання (дані пусті)")
                     reader, writer = None, None
-                    log_to_db(db_file, 'WARNING', 'PARSER', 'З\'єднання закрито')
-                    await asyncio.sleep(reconnect_delay)
+                    log_to_db(db_file, 'WARNING', 'PARSER', 'Декодер закрив з\'єднання')
+                    # Записуємо накопичені пакети перед розривом
+                    if packets_buffer:
+                        await flush_packets(db_file, packets_buffer, total_packets)
+                        packets_buffer = []
                     continue
                 
-                # Додаємо дані до буфера
-                packet_buffer += data.decode('utf-8', errors='ignore')
+                # 🟢 ДАНІ ПРИЙШЛИ! Додаємо в текстовий буфер
+                text_buffer += data.decode('utf-8', errors='ignore')
                 
-                # Обробляємо рядки з буфера
-                while '\n' in packet_buffer:
-                    line, packet_buffer = packet_buffer.split('\n', 1)
+                # Обробляємо ВСІ повні рядки з буфера
+                while '\n' in text_buffer:
+                    line, text_buffer = text_buffer.split('\n', 1)
+                    line = line.strip()
                     
-                    # Парсимо рядок
-                    packet = parse_line(line, db_file)
-                    
-                    if packet:
-                        # Зберігаємо в БД
-                        if save_packet_to_db(db_file, packet):
-                            packets_count += 1
-                            if packets_count % 100 == 0:
-                                logger.info(f"[PARSER] Оброблено {packets_count} пакетів")
+                    # Парсимо тільки K1 та K2 пакети (без логування для інших)
+                    if line.startswith('K1 ') or line.startswith('K2 '):
+                        packet = parse_line(line, db_file)
+                        if packet:
+                            packets_buffer.append(packet)
+                    # Інші рядки просто ігноруємо без логування
                 
-            except asyncio.TimeoutError:
-                logger.warning("[PARSER] Timeout при читанні даних")
+                # Перевіряємо, чи час флаша
+                current_time = asyncio.get_event_loop().time()
+                if current_time - last_flush_time >= buffer_interval and packets_buffer:
+                    total_packets = await flush_packets(db_file, packets_buffer, total_packets)
+                    packets_buffer = []
+                    last_flush_time = current_time
+                
+            except ConnectionResetError as e:
+                logger.error(f"[PARSER] Розрив з'єднання: {e}")
                 reader, writer = None, None
-                log_to_db(db_file, 'WARNING', 'PARSER', 'Timeout')
-                await asyncio.sleep(reconnect_delay)
+                log_to_db(db_file, 'ERROR', 'PARSER', 'Розрив з\'єднання', str(e))
+                # Записуємо накопичені пакети перед розривом
+                if packets_buffer:
+                    total_packets = await flush_packets(db_file, packets_buffer, total_packets)
+                    packets_buffer = []
+                continue
+            
+            except OSError as e:
+                logger.error(f"[PARSER] Помилка мережі: {e}")
+                reader, writer = None, None
+                log_to_db(db_file, 'ERROR', 'PARSER', 'Помилка мережі', str(e)[:200])
+                # Записуємо накопичені пакети перед розривом
+                if packets_buffer:
+                    total_packets = await flush_packets(db_file, packets_buffer, total_packets)
+                    packets_buffer = []
                 continue
             
             except Exception as e:
                 logger.error(f"[PARSER] Помилка при читанні: {e}")
                 reader, writer = None, None
-                log_to_db(db_file, 'ERROR', 'PARSER', 'Помилка читання', str(e))
-                await asyncio.sleep(reconnect_delay)
+                log_to_db(db_file, 'ERROR', 'PARSER', 'Помилка читання', str(e)[:200])
+                # Записуємо накопичені пакети перед розривом
+                if packets_buffer:
+                    total_packets = await flush_packets(db_file, packets_buffer, total_packets)
+                    packets_buffer = []
                 continue
-            
-            await asyncio.sleep(parser_interval)
         
         except KeyboardInterrupt:
+            logger.info("[PARSER] Цикл зупинений користувачем")
+            # Записуємо накопичені пакети перед завершенням
+            if packets_buffer:
+                total_packets = await flush_packets(db_file, packets_buffer, total_packets)
             break
         
         except Exception as e:
-            logger.error(f"[PARSER] Критична помилка: {e}")
-            log_to_db(db_file, 'ERROR', 'PARSER', 'Критична помилка', str(e))
+            logger.error(f"[PARSER] Критична помилка циклу: {e}")
+            log_to_db(db_file, 'ERROR', 'PARSER', 'Критична помилка', str(e)[:200])
             await asyncio.sleep(reconnect_delay)
     
     # Закриваємо з'єднання при завершенні
     if writer:
-        writer.close()
-        await writer.wait_closed()
+        try:
+            writer.close()
+            await writer.wait_closed()
+        except:
+            pass
     
     logger.info("[PARSER] Парсер зупинений")
     log_to_db(db_file, 'INFO', 'PARSER', 'Парсер зупинений')
