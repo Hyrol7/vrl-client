@@ -23,7 +23,7 @@ GITHUB_REPO = "vrl-client"
 GITHUB_API = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}"
 
 # Локальна версія
-LOCAL_VERSION = "1.0.0"
+LOCAL_VERSION = "0.1.0"
 
 
 def get_latest_release():

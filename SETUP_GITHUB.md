@@ -114,10 +114,10 @@ GitHub Actions вже налаштована в файлі `.github/workflows/bu
 cd /Users/oleksandr/Desktop/api
 
 # Створити tag
-git tag v1.0.0
+git tag v0.1.0
 
 # Завантажити на GitHub
-git push origin v1.0.0
+git push origin v0.1.0
 ```
 
 **Що буде:**
@@ -208,7 +208,7 @@ git push origin v1.0.1
 - [ ] Перший commit: `git commit -m "Initial commit"`
 - [ ] Добавити remote: `git remote add origin https://...`
 - [ ] Push на GitHub: `git push -u origin main`
-- [ ] Первий tag: `git tag v1.0.0 && git push origin v1.0.0`
+- [ ] Первий tag: `git tag v0.1.0 && git push origin v0.1.0`
 - [ ] Перевірити GitHub Actions запустилась
 - [ ] Скачати exe з Releases та протестувати
 - [ ] Все працює!
