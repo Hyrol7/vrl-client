@@ -248,7 +248,7 @@ async def send_tracks_to_api(config: Dict, db_file: str, tracks: List[Dict]) -> 
         return False
 
 
-async def sender_loop(config: Dict, db_file: str):
+async def sender_loop(config: Dict, db_file: str, app_state):
     """
     Головний цикл sender
     
@@ -265,6 +265,12 @@ async def sender_loop(config: Dict, db_file: str):
     
     logger.info("[SENDER] Запуск sender...")
     log_to_db(db_file, 'INFO', 'SENDER', 'Sender запущений')
+    
+    # Ініціалізуємо стан sender
+    app_state.sender_state['running'] = True
+    app_state.sender_state['last_run'] = None
+    app_state.sender_state['packets_sent'] = 0
+    app_state.sender_state['last_error'] = None
     
     sender_interval = config['cycles'].get('sender_interval', 3)
     batch_size = config['cycles'].get('batch_size', BATCH_SIZE)
@@ -287,22 +293,30 @@ async def sender_loop(config: Dict, db_file: str):
             if success:
                 total_sent += len(tracks)
                 failed_count = 0  # Скидаємо лічильник при успіху
+                import time
+                app_state.sender_state['last_run'] = int(time.time())
+                app_state.sender_state['packets_sent'] = len(tracks)
+                app_state.sender_state['last_error'] = None
                 logger.info(f"[SENDER] Статистика: всього надіслано {total_sent} tracks")
             else:
                 failed_count += 1
+                app_state.sender_state['last_error'] = 'Помилка при відправці'
                 if failed_count % 5 == 0:  # Логуємо кожні 5 невдач
                     logger.warning(f"[SENDER] {failed_count} неудалих спроб — дані збережені в БД")
             
             await asyncio.sleep(sender_interval)
         
         except KeyboardInterrupt:
+            app_state.sender_state['running'] = False
             logger.info("[SENDER] Цикл зупинений")
             break
         
         except Exception as e:
             logger.error(f"[SENDER] Критична помилка в циклі: {e}")
+            app_state.sender_state['last_error'] = str(e)[:100]
             log_to_db(db_file, 'ERROR', 'SENDER', 'Критична помилка циклу', str(e)[:200])
             await asyncio.sleep(sender_interval)
     
+    app_state.sender_state['running'] = False
     logger.info("[SENDER] Sender зупинений")
     log_to_db(db_file, 'INFO', 'SENDER', 'Sender зупинений')

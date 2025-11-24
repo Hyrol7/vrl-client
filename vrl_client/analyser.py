@@ -194,10 +194,16 @@ def get_flight_tracks_for_sending(db_file, limit=100):
         return []
 
 
-async def analyser_loop(config, db_file):
+async def analyser_loop(config, db_file, app_state):
     """Головний цикл аналізатора"""
     logger.info("[ANALYSER] Запуск аналізатора...")
     log_to_db(db_file, 'INFO', 'ANALYSER', 'Аналізатор запущений')
+    
+    # Ініціалізуємо стан аналізатора
+    app_state.analyser_state['running'] = True
+    app_state.analyser_state['last_run'] = None
+    app_state.analyser_state['packets_processed'] = 0
+    app_state.analyser_state['last_error'] = None
     
     analyser_interval = config['cycles'].get('analyser_interval', 2)
     batch_size = config['cycles'].get('batch_size', 1000)
@@ -218,6 +224,10 @@ async def analyser_loop(config, db_file):
             
             if matches:
                 total_matches += len(matches)
+                import time
+                app_state.analyser_state['last_run'] = int(time.time())
+                app_state.analyser_state['packets_processed'] = len(matches)
+                app_state.analyser_state['last_error'] = None
                 logger.info(f"[ANALYSER] Оброблено: {len(matches)} матчів (всього: {total_matches})")
                 log_to_db(db_file, 'INFO', 'ANALYSER', f'Оброблено {len(matches)} матчів', 
                          json.dumps({'matches': len(matches), 'total': total_matches}))
@@ -225,12 +235,15 @@ async def analyser_loop(config, db_file):
             await asyncio.sleep(analyser_interval)
         
         except KeyboardInterrupt:
+            app_state.analyser_state['running'] = False
             break
         
         except Exception as e:
             logger.error(f"[ANALYSER] Помилка: {e}")
+            app_state.analyser_state['last_error'] = str(e)[:100]
             log_to_db(db_file, 'ERROR', 'ANALYSER', 'Помилка аналізу', str(e))
             await asyncio.sleep(analyser_interval)
     
+    app_state.analyser_state['running'] = False
     logger.info("[ANALYSER] Аналізатор зупинений")
     log_to_db(db_file, 'INFO', 'ANALYSER', 'Аналізатор зупинений')

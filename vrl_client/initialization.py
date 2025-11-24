@@ -45,6 +45,7 @@ DEFAULT_CONFIG = {
         'bearer_token': 'your-bearer-token-here',
         'timeout': 30,
         'ping_interval': 30,
+        'status_interval': 30,    # сек - запис статусу в БД (синхро з ping)
     },
     'database': {
         'file': 'base.db',
@@ -84,6 +85,51 @@ CREATE TABLE IF NOT EXISTS logs (
     details TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS status (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    
+    -- ОСНОВНА ІНФОРМАЦІЯ
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    
+    -- PARSER
+    parser_running INTEGER DEFAULT 0,
+    parser_connected INTEGER DEFAULT 0,
+    parser_packets_total INTEGER DEFAULT 0,
+    parser_packets_last_flush INTEGER DEFAULT 0,
+    parser_buffer_size INTEGER DEFAULT 0,
+    parser_last_error TEXT,
+    
+    -- ANALYSER
+    analyser_running INTEGER DEFAULT 0,
+    analyser_last_run DATETIME,
+    analyser_packets_processed INTEGER DEFAULT 0,
+    analyser_last_error TEXT,
+    
+    -- SENDER
+    sender_running INTEGER DEFAULT 0,
+    sender_last_run DATETIME,
+    sender_packets_sent INTEGER DEFAULT 0,
+    sender_last_error TEXT,
+    
+    -- PING_HANDLER
+    ping_handler_running INTEGER DEFAULT 0,
+    ping_handler_last_run DATETIME,
+    ping_handler_last_error TEXT,
+    
+    -- ЗАГАЛЬНІ МЕТРИКИ
+    total_packets_in_db INTEGER DEFAULT 0,
+    total_logs_in_db INTEGER DEFAULT 0,
+    db_size_bytes INTEGER DEFAULT 0,
+    
+    -- СТАН СИСТЕМИ
+    uptime_seconds INTEGER DEFAULT 0,
+    memory_usage_mb REAL DEFAULT 0,
+    last_error TEXT,
+    
+    -- ВЕРСІЯ
+    app_version TEXT
+);
 """
 
 
@@ -94,6 +140,7 @@ CREATE TABLE IF NOT EXISTS logs (
 REQUIRED_LIBS = {
     'yaml': 'PyYAML',
     'requests': 'requests',
+    'psutil': 'psutil',
 }
 OPTIONAL_LIBS = {
     'ntplib': 'ntplib (для точної синхронізації часу)',

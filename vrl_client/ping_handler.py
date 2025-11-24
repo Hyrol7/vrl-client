@@ -149,7 +149,7 @@ def send_status_ping(ping_status, db_file):
         return False
 
 
-async def ping_loop(ping_status, db_file):
+async def ping_loop(ping_status, db_file, app_state):
     """
     Периодично відправляємо статус на API сервер (нескінченний цикл)
     
@@ -158,10 +158,16 @@ async def ping_loop(ping_status, db_file):
     ПАРАМЕТРИ:
         - ping_status: об'єкт PingStatus
         - db_file: шлях до БД (для логування)
+        - app_state: об'єкт AppState для оновлення стану
     
     ПОВЕРТАЄ:
         - Ніколи (нескінченний цикл, поки програма працює)
     """
+    # Ініціалізуємо стан ping_handler
+    app_state.ping_handler_state['running'] = True
+    app_state.ping_handler_state['last_run'] = None
+    app_state.ping_handler_state['last_error'] = None
+    
     ping_interval = ping_status.config['api'].get('ping_interval', 30)
     failed_count = 0
     
@@ -175,15 +181,21 @@ async def ping_loop(ping_status, db_file):
             success = send_status_ping(ping_status, db_file)
             
             if success:
+                import time
                 failed_count = 0  # Скидаємо лічильник при успіху
+                app_state.ping_handler_state['last_run'] = int(time.time())
+                app_state.ping_handler_state['last_error'] = None
             else:
                 failed_count += 1
+                app_state.ping_handler_state['last_error'] = 'Помилка при відправці ping'
                 if failed_count % 5 == 0:  # Логуємо кожні 5 невдач
                     logger.warning(f"[PING] {failed_count} неудалих спроб надіслати статус")
         
         except KeyboardInterrupt:
+            app_state.ping_handler_state['running'] = False
             logger.info("[PING] Цикл зупинений")
             break
         
         except Exception as e:
             logger.error(f"[PING] Критична помилка в циклі: {e}")
+            app_state.ping_handler_state['last_error'] = str(e)[:100]

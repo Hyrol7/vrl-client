@@ -240,7 +240,7 @@ async def connect_to_decoder(config):
         return None, None
 
 
-async def parser_loop(config, db_file):
+async def parser_loop(config, db_file, app_state):
     """
     Головний цикл парсера
     
@@ -254,6 +254,14 @@ async def parser_loop(config, db_file):
     """
     logger.info("[PARSER] Запуск парсера...")
     log_to_db(db_file, 'INFO', 'PARSER', 'Парсер запущений')
+    
+    # Ініціалізуємо стан парсера
+    app_state.parser_state['running'] = True
+    app_state.parser_state['connected'] = False
+    app_state.parser_state['packets_total'] = 0
+    app_state.parser_state['packets_last_flush'] = 0
+    app_state.parser_state['buffer_size'] = 0
+    app_state.parser_state['last_error'] = None
     
     # Валідація конфігурації з дефолтними значеннями
     DEFAULT_DECODER = {
@@ -300,6 +308,8 @@ async def parser_loop(config, db_file):
                     logger.info("[PARSER] ✓ Підключено до декодера")
                     log_to_db(db_file, 'INFO', 'PARSER', 'Підключено до декодера')
                     connected = True
+                    app_state.parser_state['connected'] = True
+                    app_state.parser_state['last_error'] = None
                     text_buffer = ""  # Очищуємо text_buffer при новому підключенні
                     # ⚠️ НЕ скидаємо last_flush_time тут! Залишаємо таймер як є
                     continue

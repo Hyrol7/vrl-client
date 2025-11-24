@@ -40,6 +40,7 @@ from ping_handler import PingStatus, ping_loop
 from parser import parser_loop
 from analyser import analyser_loop
 from sender import sender_loop
+from status_manager import update_status, get_latest_status, get_system_metrics, format_status_json
 
 # ============================================================
 # ЛОГУВАННЯ
@@ -65,9 +66,112 @@ class AppState:
         self.db_file = None
         self.config = None
         self.ping_status = None
+        
+        # СТАН КОМПОНЕНТІВ (для status_reporter)
+        self.parser_state = {
+            'running': False,
+            'connected': False,
+            'packets_total': 0,
+            'packets_last_flush': 0,
+            'buffer_size': 0,
+            'last_error': None,
+        }
+        self.analyser_state = {
+            'running': False,
+            'last_run': None,
+            'packets_processed': 0,
+            'last_error': None,
+        }
+        self.sender_state = {
+            'running': False,
+            'last_run': None,
+            'packets_sent': 0,
+            'last_error': None,
+        }
+        self.ping_handler_state = {
+            'running': False,
+            'last_run': None,
+            'last_error': None,
+        }
+        
+        # UPTIME
+        self.start_time = None
 
 
 app_state = AppState()
+
+
+# ============================================================
+# STATUS REPORTER - ЗАПИС СТАТУСУ КОЖНІ 30 СЕК
+# ============================================================
+
+async def status_reporter_loop(app_state):
+    """
+    Кожні 30 сек:
+    1. Збираємо стан всіх компонентів
+    2. Записуємо в таблицю status
+    3. Логуємо
+    """
+    status_interval = app_state.config.get('api', {}).get('status_interval', 30)
+    
+    logger.info(f"[STATUS] Запуск status_reporter (інтервал {status_interval}s)")
+    
+    while True:
+        try:
+            await asyncio.sleep(status_interval)
+            
+            # Збираємо стан
+            metrics = get_system_metrics(app_state.db_file)
+            
+            # Обчислюємо uptime
+            uptime = 0
+            if app_state.start_time:
+                import time
+                uptime = int(time.time() - app_state.start_time)
+            
+            # Формуємо status_data
+            status_data = {
+                'parser_running': app_state.parser_state['running'],
+                'parser_connected': app_state.parser_state['connected'],
+                'parser_packets_total': app_state.parser_state['packets_total'],
+                'parser_packets_last_flush': app_state.parser_state['packets_last_flush'],
+                'parser_buffer_size': app_state.parser_state['buffer_size'],
+                'parser_last_error': app_state.parser_state['last_error'],
+                
+                'analyser_running': app_state.analyser_state['running'],
+                'analyser_last_run': app_state.analyser_state['last_run'],
+                'analyser_packets_processed': app_state.analyser_state['packets_processed'],
+                'analyser_last_error': app_state.analyser_state['last_error'],
+                
+                'sender_running': app_state.sender_state['running'],
+                'sender_last_run': app_state.sender_state['last_run'],
+                'sender_packets_sent': app_state.sender_state['packets_sent'],
+                'sender_last_error': app_state.sender_state['last_error'],
+                
+                'ping_handler_running': app_state.ping_handler_state['running'],
+                'ping_handler_last_run': app_state.ping_handler_state['last_run'],
+                'ping_handler_last_error': app_state.ping_handler_state['last_error'],
+                
+                'total_packets_in_db': metrics.get('total_packets_in_db', 0),
+                'total_logs_in_db': metrics.get('total_logs_in_db', 0),
+                'db_size_bytes': metrics.get('db_size_bytes', 0),
+                
+                'uptime_seconds': uptime,
+                'memory_usage_mb': metrics.get('memory_usage_mb', 0),
+                'last_error': None,
+                
+                'app_version': app_state.config.get('app', {}).get('version', '0.1.0'),
+            }
+            
+            # Записуємо в БД
+            if update_status(app_state.db_file, status_data):
+                logger.info("[STATUS] ✓ Статус записаний в БД")
+            else:
+                logger.warning("[STATUS] ✗ Не вдалось записати статус")
+        
+        except Exception as e:
+            logger.error(f"[STATUS] Критична помилка: {e}")
+            await asyncio.sleep(status_interval)
 
 
 # ============================================================
@@ -212,12 +316,17 @@ async def main():
     app_state.ping_status.stages['decoder'] = True
     app_state.ping_status.stages['tcp_connection'] = True
     
-    # Створюємо всі фонові завдання
+    # Встановлюємо час старту для uptime
+    import time
+    app_state.start_time = time.time()
+    
+    # Створюємо всі фонові завдання (включно з status_reporter)
     tasks = [
-        asyncio.create_task(ping_loop(app_state.ping_status, db_file)),
-        asyncio.create_task(parser_loop(config, db_file)),
-        asyncio.create_task(analyser_loop(config, db_file)),
-        asyncio.create_task(sender_loop(config, db_file)),
+        asyncio.create_task(status_reporter_loop(app_state)),
+        asyncio.create_task(ping_loop(app_state.ping_status, db_file, app_state)),
+        asyncio.create_task(parser_loop(config, db_file, app_state)),
+        asyncio.create_task(analyser_loop(config, db_file, app_state)),
+        asyncio.create_task(sender_loop(config, db_file, app_state)),
     ]
     
     try:
