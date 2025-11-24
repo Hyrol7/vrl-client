@@ -48,7 +48,7 @@ def build_exe():
         '--console',                    # Show console
         '--name=VRL_Client',            # exe name
         f'--distpath={dist_dir}',       # exe directory
-        f'--buildpath={build_dir}',     # temp directory
+        f'--workpath={build_dir}',      # temp directory
         f'--specpath={project_root}',   # spec file directory
         '--hidden-import=yaml',         # Include yaml
         '--hidden-import=requests',     # Include requests
