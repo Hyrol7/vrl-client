@@ -179,22 +179,26 @@ async def flush_packets(db_file, packets_buffer, total_packets):
         conn = sqlite3.connect(db_file)
         cursor = conn.cursor()
         
-        # Записуємо усі пакети з буфера в БД
-        for packet in packets_buffer:
-            cursor.execute(
-                """INSERT INTO packets_raw 
-                   (event_time, type, callsign, height, fuel, alarm, faithfulness)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    packet['event_time'],
-                    packet['type'],
-                    packet['callsign'],
-                    packet['height'],
-                    packet['fuel'],
-                    packet['alarm'],
-                    packet['faithfulness'],
-                )
+        # Батч-запис: executemany() одним запитом (набагато швидше!)
+        data = [
+            (
+                packet['event_time'],
+                packet['type'],
+                packet['callsign'],
+                packet['height'],
+                packet['fuel'],
+                packet['alarm'],
+                packet['faithfulness'],
             )
+            for packet in packets_buffer
+        ]
+        
+        cursor.executemany(
+            """INSERT INTO packets_raw 
+               (event_time, type, callsign, height, fuel, alarm, faithfulness)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            data
+        )
         
         conn.commit()
         conn.close()
@@ -217,14 +221,16 @@ async def flush_packets(db_file, packets_buffer, total_packets):
 
 async def connect_to_decoder(config):
     """Підключаємось до TCP-порту декодера"""
-    host = config['decoder']['host']
-    port = config['decoder']['port']
-    timeout = config['decoder']['timeout']
+    decoder_config = config.get('decoder', {})
+    
+    host = decoder_config.get('host', '127.0.0.1')
+    port = decoder_config.get('port', 31003)
+    connect_timeout = decoder_config.get('connect_timeout', 2)
     
     try:
         reader, writer = await asyncio.wait_for(
             asyncio.open_connection(host, port),
-            timeout=timeout
+            timeout=connect_timeout
         )
         logger.info(f"✓ Підключено до декодера ({host}:{port})")
         return reader, writer
@@ -253,17 +259,20 @@ async def parser_loop(config, db_file):
     DEFAULT_DECODER = {
         'host': '127.0.0.1',
         'port': 31003,
-        'timeout': 5,
-        'reconnect_delay': 2,
+        'connect_timeout': 2,
+        'reconnect_delay': 3,
+        'buffer_overflow_limit': 10000,
     }
     DEFAULT_CYCLES = {
-        'parser_buffer_interval': 1,
+        'parser_buffer_interval': 2,
     }
     
     decoder_config = config.get('decoder', {})
     cycles_config = config.get('cycles', {})
     
+    connect_timeout = decoder_config.get('connect_timeout', DEFAULT_DECODER['connect_timeout'])
     reconnect_delay = decoder_config.get('reconnect_delay', DEFAULT_DECODER['reconnect_delay'])
+    buffer_overflow_limit = decoder_config.get('buffer_overflow_limit', DEFAULT_DECODER['buffer_overflow_limit'])
     buffer_interval = cycles_config.get('parser_buffer_interval', DEFAULT_CYCLES['parser_buffer_interval'])
     
     reader, writer = None, None
@@ -291,8 +300,8 @@ async def parser_loop(config, db_file):
                     logger.info("[PARSER] ✓ Підключено до декодера")
                     log_to_db(db_file, 'INFO', 'PARSER', 'Підключено до декодера')
                     connected = True
-                    text_buffer = ""
-                    last_flush_time = asyncio.get_event_loop().time()
+                    text_buffer = ""  # Очищуємо text_buffer при новому підключенні
+                    # ⚠️ НЕ скидаємо last_flush_time тут! Залишаємо таймер як є
                     continue
                 else:
                     logger.warning("[PARSER] Не вдалось підключитись, спробуємо знову...")
@@ -327,6 +336,13 @@ async def parser_loop(config, db_file):
                         if packet:
                             packets_buffer.append(packet)
                     # Інші рядки просто ігноруємо без логування
+                
+                # Контроль переповнення text_buffer (overflow protection)
+                if len(text_buffer) > buffer_overflow_limit:
+                    logger.warning(f"[PARSER] text_buffer overflow ({len(text_buffer)} > {buffer_overflow_limit})")
+                    log_to_db(db_file, 'WARNING', 'PARSER', 'text_buffer overflow', 
+                             f"Size: {len(text_buffer)} bytes")
+                    text_buffer = ""  # Очищуємо буфер, щоб уникнути утечки пам'яті
                 
                 # Перевіряємо, чи час флаша
                 current_time = asyncio.get_event_loop().time()

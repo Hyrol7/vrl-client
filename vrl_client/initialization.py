@@ -29,12 +29,13 @@ DEFAULT_CONFIG = {
     },
     'decoder': {
         'path': 'C:\\Users\\User\\Downloads\\rtluvd\\', # шлях до директорії з програмою
-        'app_decoder': 'uvd_rtl.exe',   # назва файлк програми
+        'app_decoder': 'uvd_rtl.exe',   # назва файлу програми
         'command_args': '/tcp',         # аргументи запуску програми
-        'host': '127.0.0.1',            # хост, в рядку стану
-        'port': 31003,                  # порт, в рядку стану
-        'timeout': 5,                   # час очікування відповіді під час підключення
-        'reconnect_delay': 2,           # час очікування перед повторною спробою підключення
+        'host': '127.0.0.1',            # хост
+        'port': 31003,                  # порт TCP
+        'connect_timeout': 2,           # сек - таймаут для підключення
+        'reconnect_delay': 3,           # сек - затримка перед повторним перепідключенням
+        'buffer_overflow_limit': 10000,  # байт - максимальний розмір text_buffer
     },
     'api': {
         'url': 'https://yourdomain/api.php',
@@ -49,7 +50,7 @@ DEFAULT_CONFIG = {
         'file': 'base.db',
     },
     'cycles': {
-        'parser_buffer_interval': 1,   # сек - накопичення пакетів перед записом в БД
+        'parser_buffer_interval': 2,   # сек - накопичення пакетів перед записом в БД
         'analyser_interval': 5,        # сек - обробка K1↔K2 пакетів
         'sender_interval': 10,         # сек - відправка на API
         'batch_size': 1000,            # максимум записів за раз
