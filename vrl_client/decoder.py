@@ -53,10 +53,13 @@ def start_decoder(config, db_file):
     try:
         logger.info(f"  → Запускаємо: {executable} {args}")
         
+        # Парсимо аргументи в список (якщо потрібно)
+        args_list = args.split() if isinstance(args, str) else args
+        
         process = subprocess.Popen(
-            [executable, args],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            [executable] + args_list,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == 'win32' else 0
         )
         

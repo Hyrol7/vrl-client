@@ -7,7 +7,6 @@ vrl.py - Головний файл для запуску VRL Client
     - initialization.py: перевірка залежностей, конфіг, БД
     - time_sync.py: синхронізація часу
     - decoder.py: запуск декодера
-    - tcp_connection.py: перевірка TCP підключення
     - ping_handler.py: периодичний ping на API
     - parser.py: парсинг TCP даних від декодера
     - analyser.py: обробка та біндинг даних
@@ -20,9 +19,8 @@ vrl.py - Головний файл для запуску VRL Client
     4. Синхронізація часу (time_sync.sync_system_time)
     5. Конфігурація декодера (initialization.update_decoder_ini)
     6. Запуск декодера (decoder.start_decoder)
-    7. Очікування TCP підключення (tcp_connection.wait_for_decoder_connection)
-    8. Запуск ping loop (ping_handler.ping_loop) - в фоні
-    9. Запуск parser, analyser, sender - в фоні
+    7. Запуск ping loop (ping_handler.ping_loop) - в фоні
+    8. Запуск parser, analyser, sender - в фоні
 """
 
 import sys
@@ -35,7 +33,6 @@ from pathlib import Path
 from initialization import check_dependencies, load_config, init_database, log_to_db, update_decoder_ini
 from time_sync import sync_system_time
 from decoder import start_decoder, stop_decoder
-from tcp_connection import wait_for_decoder_connection
 from ping_handler import PingStatus, ping_loop
 from parser import parser_loop
 from analyser import analyser_loop

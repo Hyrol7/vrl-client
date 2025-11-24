@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_CONFIG = {
     'app': {
         'name': 'VRL Client',
-        'version': '0.1.0',
+        'version': '0.2.0',
         'timezone': 'Europe/Kiev',
     },
     'decoder': {
