@@ -1,0 +1,71 @@
+name: Build and Release EXE
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  
+jobs:
+  build:
+    name: Build VRL Client EXE
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r vrl_client/requirements.txt
+          pip install pyinstaller
+      
+      - name: Build EXE
+        run: |
+          cd vrl_client
+          python build_exe.py
+      
+      - name: Check build output
+        run: |
+          dir vrl_client\dist\
+      
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: vrl_client/dist/VRL_Client.exe
+          draft: false
+          prerelease: false
+          body: |
+            # VRL Client Release
+            
+            **Новинки в цій версії:**
+            - Це версія, яка була автоматично зібрана з коду
+            
+            **Установка:**
+            1. Завантажити `VRL_Client.exe`
+            2. Запустити на комп'ютері з Windows
+            3. При першому запуску буде створено `config.yaml`
+            4. Відредагувати конфіг та запустити знову
+            
+            **Оновлення:**
+            - Просто завантажити нову версію exe з найновішого Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: VRL_Client_Build
+          path: vrl_client/dist/VRL_Client.exe
+          retention-days: 30
