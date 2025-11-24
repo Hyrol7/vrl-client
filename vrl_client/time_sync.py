@@ -87,7 +87,7 @@ def sync_system_time(config):
         - (success, message): успіх та повідомлення про стан
     """
     logger.info("═" * 60)
-    logger.info("ЕТАП 0: СИНХРОНІЗАЦІЯ ЧАСУ")
+    logger.info("ЕТАП: СИНХРОНІЗАЦІЯ ЧАСУ")
     logger.info("═" * 60)
     
     # Отримуємо часовий пояс
