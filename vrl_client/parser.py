@@ -265,23 +265,3 @@ async def parser_loop(config, db_file):
     
     logger.info("[PARSER] Парсер зупинений")
     log_to_db(db_file, 'INFO', 'PARSER', 'Парсер зупинений')
-
-
-# Точка входу для тестування
-if __name__ == '__main__':
-    # Для тестування парсера окремо
-    test_lines = [
-        "K1 11:11:38.370.366 [ 8832] {018} **** :10437",
-        "K2 11:12:54.082.632 [ 8706] {017} **** FL 5360m [F176]+  F:40%",
-        "K1 10:44:40.708.069 [     ] {016} **** :14055",
-        "K2 10:44:45.065.415 [     ] {01B} **** FL 6130m [F201]+  F:35%",
-    ]
-    
-    print("Тестування парсера:")
-    for line in test_lines:
-        packet = parse_line(line, '')
-        if packet:
-            print(f"✓ {line}")
-            print(f"  → {packet}\n")
-        else:
-            print(f"✗ {line}\n")
