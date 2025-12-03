@@ -84,7 +84,7 @@ def sync_system_time(config):
         - config: конфігурація проекту
     
     ПОВЕРТАЄ:
-        - (success, message): успіх та повідомлення про стан
+        - (success, message, offset): успіх, повідомлення, зміщення в секундах
     """
     logger.info("═" * 60)
     logger.info("ЕТАП: СИНХРОНІЗАЦІЯ ЧАСУ")
@@ -97,6 +97,8 @@ def sync_system_time(config):
     logger.info(f"  Локальний час:  {local_time.isoformat()}")
     logger.info(f"  Часовий пояс:   {timezone_str}\n")
     
+    calculated_offset = 0.0
+    
     # Спробуємо отримати час з Інтернету кількома способами
     
     # Спосіб 1: NTP (якщо встановлено ntplib)
@@ -105,9 +107,11 @@ def sync_system_time(config):
         ntp_datetime = datetime.utcfromtimestamp(ntp_time)
         logger.info(f"  NTP час (UTC):  {ntp_datetime.isoformat()}")
         
-        diff = abs((ntp_datetime - local_time).total_seconds())
+        # Порівнюємо з локальним часом (переведеним в UTC для коректності)
+        local_utc = datetime.utcnow()
+        diff = (ntp_datetime - local_utc).total_seconds()
         
-        if diff > 5:
+        if abs(diff) > 5:
             logger.warning(f"  ⚠ Різниця: {diff:.1f} сек")
             
             if platform.system() == 'Windows':
@@ -121,7 +125,7 @@ def sync_system_time(config):
                     if result.returncode == 0:
                         logger.info(f"  ✓ Час синхронізований успішно через w32tm")
                         logger.info("")
-                        return True, "Час синхронізований через w32tm"
+                        return True, "Час синхронізований через w32tm", 0.0
                     else:
                         logger.warning(f"  ⚠ w32tm не удалося виконати")
                 except Exception as e:
@@ -133,7 +137,7 @@ def sync_system_time(config):
                     subprocess.run(['sntp', '-sS', 'pool.ntp.org'], timeout=10, check=True)
                     logger.info(f"  ✓ Час синхронізований успішно через sntp")
                     logger.info("")
-                    return True, "Час синхронізований через sntp"
+                    return True, "Час синхронізований через sntp", 0.0
                 except Exception as e:
                     logger.warning(f"  ⚠ Помилка sntp: {e}")
             
@@ -143,19 +147,19 @@ def sync_system_time(config):
                     subprocess.run(['timedatectl', 'set-ntp', 'true'], timeout=10, check=True)
                     logger.info(f"  ✓ Час синхронізований успішно через timedatectl")
                     logger.info("")
-                    return True, "Час синхронізований через timedatectl"
+                    return True, "Час синхронізований через timedatectl", 0.0
                 except Exception as e:
                     logger.warning(f"  ⚠ Помилка timedatectl: {e}")
             
             # Якщо автоматична синхронізація не вдалася
             logger.warning(f"  ⚠ Автоматична синхронізація не вдалася")
-            logger.warning(f"     Будемо враховувати часовий пояс при записі в БД")
+            logger.warning(f"     Будемо використовувати програмну корекцію часу (offset={diff:.1f}s)")
             logger.info("")
-            return False, f"Часова різниця {diff:.1f}с — враховуємо пояс"
+            return False, f"Часова різниця {diff:.1f}с — використовуємо offset", diff
         else:
             logger.info(f"  ✓ Час синхронізований (різниця < 5с)")
             logger.info("")
-            return True, "Час актуальний"
+            return True, "Час актуальний", 0.0
     
     # Спосіб 2: HTTP запит на worldtimeapi
     logger.warning(f"  ⚠ NTP недоступен, пробуємо HTTP запит...")
@@ -166,22 +170,24 @@ def sync_system_time(config):
         data = json.loads(response.read())
         
         http_datetime = datetime.fromisoformat(data['datetime'].replace('Z', '+00:00'))
+        # Видаляємо timezone info для порівняння з naive datetime
+        http_datetime = http_datetime.replace(tzinfo=None)
         logger.info(f"  HTTP час (UTC): {http_datetime.isoformat()}")
         
-        diff = abs((http_datetime - local_time).total_seconds())
+        local_utc = datetime.utcnow()
+        diff = (http_datetime - local_utc).total_seconds()
         
-        if diff > 5:
-            logger.warning(f"  ⚠ Різниця: {diff:.1f} сек — враховуємо пояс при записі")
+        if abs(diff) > 5:
+            logger.warning(f"  ⚠ Різниця: {diff:.1f} сек — використовуємо offset")
             logger.info("")
-            return False, f"Часова різниця {diff:.1f}с — враховуємо пояс"
+            return False, f"Часова різниця {diff:.1f}с — використовуємо offset", diff
         else:
             logger.info(f"  ✓ Час синхронізований (різниця < 5с)")
             logger.info("")
-            return True, "Час актуальний"
+            return True, "Час актуальний", 0.0
     
     except Exception as e:
         logger.warning(f"  ⚠ HTTP запит не вдався: {e}")
-        logger.warning(f"     Будемо використовувати локальний час")
-        logger.warning(f"     ВАЖЛИВО: Переконайтесь, що локальний час встановлений правильно!")
+        logger.warning(f"     Будемо використовувати локальний час без корекції")
         logger.info("")
-        return False, "Використовуємо локальний час"
+        return False, "Використовуємо локальний час", 0.0
