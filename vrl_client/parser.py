@@ -8,7 +8,7 @@ import asyncio
 import sqlite3
 import re
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -40,12 +40,18 @@ def log_to_db(db_file, level, component, message, details=None):
         logger.error(f"Помилка при запису логу: {e}")
 
 
-def get_local_date():
-    """Отримуємо локальну дату в форматі YYYY-MM-DD"""
-    return datetime.now().strftime('%Y-%m-%d')
+def get_local_date(time_offset=0.0):
+    """
+    Отримуємо локальну дату в форматі YYYY-MM-DD
+    Враховуємо time_offset (різницю між системним і реальним часом)
+    """
+    now = datetime.now()
+    if time_offset != 0:
+        now = now + timedelta(seconds=time_offset)
+    return now.strftime('%Y-%m-%d')
 
 
-def parse_k1_packet(line, db_file):
+def parse_k1_packet(line, db_file, time_offset=0.0):
     """
     Парсимо K1 пакет (позивний літака)
     Формат: K1 11:11:38.370.366 [ 8832] {018} **** :10437
@@ -61,7 +67,7 @@ def parse_k1_packet(line, db_file):
         seconds = match.group(3)
         callsign = match.group(6)
         
-        event_time = f"{get_local_date()} {hours}:{minutes}:{seconds}"
+        event_time = f"{get_local_date(time_offset)} {hours}:{minutes}:{seconds}"
         
         return {
             'event_time': event_time,
@@ -78,7 +84,7 @@ def parse_k1_packet(line, db_file):
         return None
 
 
-def parse_k2_packet(line, db_file):
+def parse_k2_packet(line, db_file, time_offset=0.0):
     """
     Парсимо K2 пакет (висота та паливо)
     Формат: K2 11:12:54.082.632 [ 8706] {017} **** FL 5360m [F176]+  F:40%
@@ -95,7 +101,7 @@ def parse_k2_packet(line, db_file):
         height = int(match.group(6))
         fuel = int(match.group(7))
         
-        event_time = f"{get_local_date()} {hours}:{minutes}:{seconds}"
+        event_time = f"{get_local_date(time_offset)} {hours}:{minutes}:{seconds}"
         
         return {
             'event_time': event_time,
@@ -112,7 +118,7 @@ def parse_k2_packet(line, db_file):
         return None
 
 
-def parse_line(line, db_file):
+def parse_line(line, db_file, time_offset=0.0):
     """
     Розпізнаємо тип пакету та парсимо його
     """
@@ -122,9 +128,9 @@ def parse_line(line, db_file):
     line = line.strip()
     
     if line.startswith('K1 '):
-        return parse_k1_packet(line, db_file)
+        return parse_k1_packet(line, db_file, time_offset)
     elif line.startswith('K2 '):
-        return parse_k2_packet(line, db_file)
+        return parse_k2_packet(line, db_file, time_offset)
     else:
         # Ігноруємо інші рядки (наприклад, інформацію про старт програми)
         return None
@@ -345,7 +351,8 @@ async def parser_loop(config, db_file, app_state):
                     
                     # Парсимо тільки K1 та K2 пакети (без логування для інших)
                     if line.startswith('K1 ') or line.startswith('K2 '):
-                        packet = parse_line(line, db_file)
+                        # Використовуємо актуальний time_offset з app_state
+                        packet = parse_line(line, db_file, app_state.time_offset)
                         if packet:
                             packets_buffer.append(packet)
                     # Інші рядки просто ігноруємо без логування

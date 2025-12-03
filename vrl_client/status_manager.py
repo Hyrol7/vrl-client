@@ -10,60 +10,38 @@ status_manager.py - Управління статусом системи
 
 import sqlite3
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import psutil
 
 logger = logging.getLogger(__name__)
 
 
-def update_status(db_file, status_data):
+def update_status(db_file, status_data, time_offset=0.0):
     """
     Записуємо статус в таблицю status
     
     ПАРАМЕТРИ:
         - db_file: шлях до БД
         - status_data: dict з даними статусу
-            {
-                'parser_running': bool,
-                'parser_connected': bool,
-                'parser_packets_total': int,
-                'parser_packets_last_flush': int,
-                'parser_buffer_size': int,
-                'parser_last_error': str,
-                
-                'analyser_running': bool,
-                'analyser_last_run': datetime or None,
-                'analyser_packets_processed': int,
-                'analyser_last_error': str,
-                
-                'sender_running': bool,
-                'sender_last_run': datetime or None,
-                'sender_packets_sent': int,
-                'sender_last_error': str,
-                
-                'ping_handler_running': bool,
-                'ping_handler_last_run': datetime or None,
-                'ping_handler_last_error': str,
-                
-                'total_packets_in_db': int,
-                'total_logs_in_db': int,
-                'db_size_bytes': int,
-                
-                'uptime_seconds': int,
-                'memory_usage_mb': float,
-                'last_error': str,
-                
-                'app_version': str,
-            }
+        - time_offset: зміщення часу в секундах
     """
     try:
         conn = sqlite3.connect(db_file)
         cursor = conn.cursor()
         
+        # Додаємо правильний timestamp з урахуванням offset
+        now = datetime.now()
+        if time_offset != 0:
+            now = now + timedelta(seconds=time_offset)
+            
+        # Копіюємо словник, щоб не змінювати оригінал
+        data_to_insert = status_data.copy()
+        data_to_insert['timestamp'] = now.strftime('%Y-%m-%d %H:%M:%S')
+        
         # Інтерполюємо значення, перетворюючи bool в int (0/1)
         insert_data = []
-        for key, value in status_data.items():
+        for key, value in data_to_insert.items():
             if isinstance(value, bool):
                 insert_data.append((key, 1 if value else 0))
             else:

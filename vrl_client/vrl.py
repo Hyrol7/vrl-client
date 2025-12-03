@@ -38,6 +38,7 @@ from parser import parser_loop
 from analyser import analyser_loop
 from sender import sender_loop
 from status_manager import update_status, get_latest_status, get_system_metrics, format_status_json
+from datetime import datetime
 
 # ============================================================
 # ЛОГУВАННЯ
@@ -93,9 +94,58 @@ class AppState:
         
         # UPTIME
         self.start_time = None
+        
+        # TIME OFFSET (різниця між системним і реальним часом в секундах)
+        # Якщо системний час відстає на 5 сек, offset буде +5
+        self.time_offset = 0.0
 
 
 app_state = AppState()
+
+
+# ============================================================
+# TIME SYNC LOOP - СИНХРОНІЗАЦІЯ ЧАСУ ЩОГОДИНИ
+# ============================================================
+
+async def time_sync_loop(config):
+    """
+    Кожну годину (в 00:05) синхронізує час
+    """
+    logger.info("[TIME] Запуск time_sync_loop (щогодини в XX:00:05)")
+    
+    while True:
+        try:
+            now = datetime.now()
+            # Рахуємо скільки секунд до наступної години + 5 секунд
+            # (3600 - поточні секунди) + 5
+            seconds_until_next_run = (3600 - (now.minute * 60 + now.second)) + 5
+            
+            # Якщо ми вже в перших 5 секундах години, чекаємо до наступної години
+            if now.minute == 0 and now.second < 5:
+                seconds_until_next_run = 5 - now.second
+            
+            logger.info(f"[TIME] Наступна синхронізація через {int(seconds_until_next_run)} сек")
+            
+            # Чекаємо
+            await asyncio.sleep(seconds_until_next_run)
+            
+            logger.info("[TIME] ⏰ Планова синхронізація часу...")
+            success, msg, offset = sync_system_time(config)
+            
+            # Оновлюємо глобальний offset
+            app_state.time_offset = offset
+            
+            if success:
+                logger.info(f"[TIME] ✓ {msg}")
+            else:
+                logger.warning(f"[TIME] ⚠ {msg}")
+                
+            # Чекаємо 10 секунд, щоб точно вийти з 5-секундної зони і не запуститись двічі
+            await asyncio.sleep(10)
+            
+        except Exception as e:
+            logger.error(f"[TIME] Помилка циклу синхронізації: {e}")
+            await asyncio.sleep(60)
 
 
 # ============================================================
@@ -161,7 +211,7 @@ async def status_reporter_loop(app_state):
             }
             
             # Записуємо в БД
-            if update_status(app_state.db_file, status_data):
+            if update_status(app_state.db_file, status_data, app_state.time_offset):
                 logger.info("[STATUS] ✓ Статус записаний в БД")
             else:
                 logger.warning("[STATUS] ✗ Не вдалось записати статус")
@@ -244,7 +294,8 @@ async def main():
     # ========================================
     # ЕТАП 3: Синхронізація часу
     # ========================================
-    time_synced, time_message = sync_system_time(config)
+    time_synced, time_message, time_offset = sync_system_time(config)
+    app_state.time_offset = time_offset
     
     # ========================================
     # ЕТАП 3.5: Конфігурація декодера
@@ -260,14 +311,9 @@ async def main():
     # ========================================
     # ЕТАП 5: Очікування TCP підключення
     # ========================================
-    connected = await wait_for_decoder_connection(config, db_file)
-    
-    if not connected:
-        logger.error("❌ Не вдалося підключитися до декодера")
-        log_to_db(db_file, 'ERROR', 'MAIN', 'Не вдалося підключитися до декодера', None)
-        
-        stop_decoder(decoder_process)
-        sys.exit(1)
+    # Ми більше не чекаємо підключення тут, parser.py зробить це сам
+    # Це дозволяє програмі не зависати, якщо декодер довго стартує
+    logger.info("  → Очікування TCP підключення передано в parser.py")
     
     # ========================================
     # ГОТОВО: Всі етапи завершені
@@ -319,6 +365,7 @@ async def main():
     
     # Створюємо всі фонові завдання (включно з status_reporter)
     tasks = [
+        asyncio.create_task(time_sync_loop(config)),
         asyncio.create_task(status_reporter_loop(app_state)),
         asyncio.create_task(ping_loop(app_state.ping_status, db_file, app_state)),
         asyncio.create_task(parser_loop(config, db_file, app_state)),
