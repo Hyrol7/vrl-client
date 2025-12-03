@@ -44,14 +44,17 @@ class PingStatus:
         self.messages = {}
         self.tcp_connected = False
     
-    def to_dict(self):
+    def to_dict(self, time_offset=0):
         """Конвертуємо статус в словник"""
         uptime = (datetime.now() - self.start_time).total_seconds()
+        
+        from datetime import timedelta
+        current_utc = datetime.utcnow() + timedelta(seconds=time_offset)
         
         return {
             'client_id': self.config['api']['client_id'],
             'version': self.config['app']['version'],
-            'timestamp': datetime.utcnow().isoformat() + 'Z',
+            'timestamp': current_utc.isoformat() + 'Z',
             'uptime_seconds': uptime,
             'stages': self.stages,
             'messages': self.messages,
@@ -74,26 +77,28 @@ class PingStatus:
 # ГЕНЕРАЦІЯ ТА ВІДПРАВКА PING
 # ============================================================
 
-def generate_status_ping(ping_status):
+def generate_status_ping(ping_status, time_offset=0):
     """
     Генеруємо JSON статусу для відправки на API
     
     ПАРАМЕТРИ:
         - ping_status: об'єкт PingStatus
+        - time_offset: зміщення часу в секундах
     
     ПОВЕРТАЄ:
         - ping_data (dict): JSON статус
     """
-    return ping_status.to_dict()
+    return ping_status.to_dict(time_offset)
 
 
-def send_status_ping(ping_status, db_file):
+def send_status_ping(ping_status, db_file, time_offset=0):
     """
     Відправляємо статус на API сервер (ping)
     
     ПАРАМЕТРИ:
         - ping_status: об'єкт PingStatus
         - db_file: шлях до БД (для логування)
+        - time_offset: зміщення часу в секундах
     
     ПОВЕРТАЄ:
         - True/False: успіх відправки
@@ -102,7 +107,7 @@ def send_status_ping(ping_status, db_file):
         import requests
         
         config = ping_status.config
-        ping_data = generate_status_ping(ping_status)
+        ping_data = generate_status_ping(ping_status, time_offset)
         
         # Генеруємо HMAC сигнатуру
         payload_str = json.dumps(ping_data, sort_keys=True)
@@ -178,7 +183,7 @@ async def ping_loop(ping_status, db_file, app_state):
             await asyncio.sleep(ping_interval)
             
             # Спробуємо надіслати ping
-            success = send_status_ping(ping_status, db_file)
+            success = send_status_ping(ping_status, db_file, app_state.time_offset)
             
             if success:
                 import time
