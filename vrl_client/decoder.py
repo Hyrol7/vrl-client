@@ -9,6 +9,7 @@ decoder.py - Запуск та управління декодером
 
 import sys
 import os
+import time
 import signal
 import subprocess
 import logging
@@ -37,7 +38,7 @@ def start_decoder(config, db_file):
     logger.info("ЕТАП: ЗАПУСК ДЕКОДЕРА")
     logger.info("═" * 60)
     
-    executable = config['decoder']['executable']
+    executable = os.path.join(config['decoder']['path'], config['decoder']['app_decoder'])
     args = config['decoder']['command_args']
     
     # Перевіряємо наявність виконуваного файлу
@@ -64,7 +65,16 @@ def start_decoder(config, db_file):
         )
         
         logger.info(f"  ✓ Декодер запущений")
-        logger.info(f"     PID: {process.pid}\n")
+        logger.info(f"     PID: {process.pid}")
+        
+        # Чекаємо 2 секунди, щоб переконатися, що процес не впав відразу
+        time.sleep(2)
+        
+        if process.poll() is not None:
+            # Процес завершився майже відразу - це помилка
+            raise RuntimeError(f"Декодер завершив роботу відразу після запуску (код {process.returncode})")
+            
+        logger.info(f"     Статус: Працює стабільно\n")
         
         from initialization import log_to_db
         log_to_db(db_file, 'INFO', 'DECODER', 'Декодер запущений', f"PID: {process.pid}")
