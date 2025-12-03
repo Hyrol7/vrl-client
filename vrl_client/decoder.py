@@ -13,6 +13,7 @@ import time
 import signal
 import subprocess
 import logging
+import psutil
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,39 @@ logger = logging.getLogger(__name__)
 # ============================================================
 # ЗАПУСК ДЕКОДЕРА
 # ============================================================
+
+def kill_existing_decoders(process_name):
+    """
+    Знаходимо та завершуємо всі процеси з вказаним ім'ям
+    
+    ПАРАМЕТРИ:
+        - process_name: ім'я виконуваного файлу (наприклад 'uvd_rtl.exe')
+    """
+    logger.info(f"  → Перевірка запущених процесів '{process_name}'...")
+    killed_count = 0
+    
+    for proc in psutil.process_iter(['pid', 'name']):
+        try:
+            if proc.info['name'] and proc.info['name'].lower() == process_name.lower():
+                logger.warning(f"     Знайдено старий процес (PID: {proc.info['pid']}). Завершуємо...")
+                proc.terminate()
+                killed_count += 1
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
+            
+    if killed_count > 0:
+        logger.info(f"     Очікуємо завершення {killed_count} процесів...")
+        # Даємо час на коректне завершення
+        gone, alive = psutil.wait_procs([p for p in psutil.process_iter() if p.name().lower() == process_name.lower()], timeout=3)
+        
+        for p in alive:
+            logger.warning(f"     Процес {p.pid} не завершився, вбиваємо примусово (KILL)...")
+            p.kill()
+            
+        logger.info(f"  ✓ Всі старі копії декодера зупинені")
+    else:
+        logger.info(f"  ✓ Старих копій не знайдено")
+
 
 def start_decoder(config, db_file):
     """
@@ -38,8 +72,15 @@ def start_decoder(config, db_file):
     logger.info("ЕТАП: ЗАПУСК ДЕКОДЕРА")
     logger.info("═" * 60)
     
-    executable = os.path.join(config['decoder']['path'], config['decoder']['app_decoder'])
+    app_decoder = config['decoder']['app_decoder']
+    executable = os.path.join(config['decoder']['path'], app_decoder)
     args = config['decoder']['command_args']
+    
+    # КРОК 1: Вбиваємо старі процеси
+    try:
+        kill_existing_decoders(app_decoder)
+    except Exception as e:
+        logger.warning(f"  ⚠ Помилка при очистці процесів: {e}")
     
     # Перевіряємо наявність виконуваного файлу
     if not os.path.exists(executable):
