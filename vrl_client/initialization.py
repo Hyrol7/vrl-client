@@ -23,38 +23,40 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIG = {
     'app': {
-        'name': 'VRL Client',
-        'version': '0.2.0',
-        'timezone': 'Europe/Kiev',
+        'name': 'VRL Client',           # Назва додатку
+        'version': '0.2.0',             # Версія клієнта
+        'timezone': 'Europe/Kiev',      # Часовий пояс для логів та подій
     },
     'decoder': {
-        'path': 'C:\\Users\\User\\Downloads\\rtluvd\\', # шлях до директорії з програмою (Windows)
-        # 'path': '/Users/user/Downloads/rtluvd/',      # приклад для macOS/Linux
-        'app_decoder': 'uvd_rtl.exe',   # назва файлу програми
-        'command_args': '/tcp',         # аргументи запуску програми
-        'host': '127.0.0.1',            # хост
-        'port': 31003,                  # порт TCP
-        'connect_timeout': 2,           # сек - таймаут для підключення
-        'reconnect_delay': 3,           # сек - затримка перед повторним перепідключенням
-        'buffer_overflow_limit': 10000,  # байт - максимальний розмір text_buffer
+        'path': 'C:\\Users\\User\\Downloads\\rtluvd\\', # Шлях до директорії з програмою (Windows)
+        # 'path': '/Users/user/Downloads/rtluvd/',      # Приклад для macOS/Linux
+        'app_decoder': 'uvd_rtl.exe',   # Назва виконуваного файлу декодера
+        'command_args': '/tcp',         # Аргументи запуску (наприклад, режим TCP)
+        'host': '127.0.0.1',            # IP адреса для підключення до декодера
+        'port': 31003,                  # TCP порт декодера
+        'connect_timeout': 2,           # (сек) Таймаут очікування підключення
+        'reconnect_delay': 3,           # (сек) Затримка перед повторною спробою підключення
+        'buffer_overflow_limit': 10000, # (байт) Максимальний розмір буфера перед очищенням
     },
     'api': {
-        'url': 'https://yourdomain/api.php',
-        'status_url': 'https://yourdomain/status.php',
-        'client_id': 1,
-        'secret_key': 'your-secret-key-here',
-        'bearer_token': 'your-bearer-token-here',
-        'timeout': 30,
-        'status_interval': 30,    # сек - запис статусу в БД та відправка на сервер
+        'url': 'https://yourdomain/api.php',          # URL для відправки пакетів даних
+        'status_url': 'https://yourdomain/status.php',# URL для відправки статусу здоров'я клієнта
+        'client_id': 1,                               # Унікальний ID клієнта в системі
+        'secret_key': 'your-secret-key-here',         # Секретний ключ для HMAC підпису
+        'bearer_token': 'your-bearer-token-here',     # Токен авторизації (Bearer)
+        'timeout': 30,                                # (сек) Таймаут HTTP запиту
+        'status_interval': 30,                        # (сек) Інтервал відправки статусу на сервер
+        'max_retries': 3,                             # Максимальна кількість спроб відправки при помилці
+        'retry_delay': 5,                             # (сек) Затримка між спробами відправки
     },
     'database': {
-        'file': 'base.db',
+        'file': 'base.db',              # Назва файлу бази даних SQLite
     },
     'cycles': {
-        'parser_buffer_interval': 2,   # сек - накопичення пакетів перед записом в БД
-        'analyser_interval': 5,        # сек - обробка K1↔K2 пакетів
-        'sender_interval': 10,         # сек - відправка на API
-        'batch_size': 1000,            # максимум записів за раз
+        'parser_buffer_interval': 2,    # (сек) Інтервал накопичення даних перед записом в БД
+        'analyser_interval': 5,         # (сек) Інтервал запуску аналізатора (обробка пар K1/K2)
+        'sender_interval': 10,          # (сек) Інтервал перевірки нових даних для відправки
+        'batch_size': 1000,             # Максимальна кількість записів за одну ітерацію
     },
 }
 
@@ -63,8 +65,9 @@ DEFAULT_CONFIG = {
 # ============================================================
 
 DB_SCHEMA = """
-CREATE TABLE IF NOT EXISTS packets_raw (
+CREATE TABLE IF NOT EXISTS packets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid TEXT UNIQUE,
     event_time TEXT NOT NULL,
     type INTEGER NOT NULL,
     callsign TEXT,
@@ -276,7 +279,7 @@ def init_database(config):
         cursor = conn.cursor()
         
         # Перевіряємо, які таблиці вже є
-        required_tables = ['packets_raw', 'logs', 'status']
+        required_tables = ['packets', 'logs', 'status']
         existing_tables = []
         
         for table in required_tables:

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-sender.py - Відправка flight_tracks на API сервер
-Управління розсиланням даних з обробкою помилок та повторних спроб
+sender.py - Відправка пакетів на API сервер
+Управління розсиланням даних з обробкою помилок та повторних спроб.
+Працює з таблицею packets та використовує UUID для ідентифікації.
 """
 
 import asyncio
@@ -11,19 +12,13 @@ import logging
 import hmac
 import hashlib
 import base64
+import time
 from datetime import datetime
 from typing import List, Dict, Optional
 
 import requests
 
 logger = logging.getLogger(__name__)
-
-# Максимум записів за один запит
-BATCH_SIZE = 100
-# Максимум спроб відправки
-MAX_RETRIES = 3
-# Інтервал між спробами (секунди)
-RETRY_DELAY = 5
 
 
 def log_to_db(db_file, level, component, message, details=None):
@@ -57,59 +52,56 @@ def generate_hmac_signature(data: str, secret_key: str) -> str:
         return None
 
 
-def get_pending_tracks(db_file, limit: int = BATCH_SIZE) -> List[Dict]:
+def get_pending_packets(db_file, limit: int = 100) -> List[Dict]:
     """
-    Отримуємо flight_tracks, які потрібно надіслати (sent = 0)
+    Отримуємо пакети, які потрібно надіслати (sent = 0 або sent = 2)
+    sent = 0 -> Create
+    sent = 2 -> Update
     """
     try:
         conn = sqlite3.connect(db_file)
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
         cursor.execute("""
-            SELECT id, callsign, height, fuel, timestamp
-            FROM flight_tracks
-            WHERE sent = 0
-            ORDER BY timestamp ASC
+            SELECT uuid, event_time, type, callsign, height, fuel, alarm, faithfulness, sent
+            FROM packets
+            WHERE sent IN (0, 2)
+            ORDER BY created_at ASC
             LIMIT ?
         """, (limit,))
         
         rows = cursor.fetchall()
         conn.close()
         
-        tracks = []
-        for row_id, callsign, height, fuel, timestamp in rows:
-            tracks.append({
-                'track_id': row_id,
-                'callsign': callsign,
-                'height': height,
-                'fuel': fuel,
-                'timestamp': timestamp
-            })
+        packets = []
+        for row in rows:
+            packets.append(dict(row))
         
-        return tracks
+        return packets
     
     except Exception as e:
-        logger.error(f"Помилка при читанні tracks: {e}")
+        logger.error(f"Помилка при читанні пакетів: {e}")
         return []
 
 
-def mark_tracks_as_sent(db_file, track_ids: List[int], time_offset=0.0) -> bool:
+def mark_packets_as_synced(db_file, uuids: List[str]) -> bool:
     """
-    Позначаємо tracks як надіслані (sent = 1)
+    Позначаємо пакети як синхронізовані (sent = 1)
     """
+    if not uuids:
+        return True
+        
     try:
         conn = sqlite3.connect(db_file)
         cursor = conn.cursor()
         
-        now = datetime.now()
-        if time_offset != 0:
-            now = now + timedelta(seconds=time_offset)
+        # SQLite має ліміт на кількість змінних, тому розбиваємо на чанки якщо треба
+        # Але для BATCH_SIZE=100 це не проблема
+        placeholders = ','.join(['?'] * len(uuids))
+        query = f"UPDATE packets SET sent = 1, updated_at = CURRENT_TIMESTAMP WHERE uuid IN ({placeholders})"
         
-        for track_id in track_ids:
-            cursor.execute(
-                "UPDATE flight_tracks SET sent = 1, sent_at = ? WHERE id = ?",
-                (now.isoformat(), track_id)
-            )
+        cursor.execute(query, uuids)
         
         conn.commit()
         conn.close()
@@ -117,65 +109,53 @@ def mark_tracks_as_sent(db_file, track_ids: List[int], time_offset=0.0) -> bool:
         return True
     
     except Exception as e:
-        logger.error(f"Помилка при позначенні tracks: {e}")
+        logger.error(f"Помилка при оновленні статусу пакетів: {e}")
         return False
 
 
-def mark_tracks_as_failed(db_file, track_ids: List[int], error_msg: str) -> bool:
+async def send_packets_to_api(config: Dict, db_file: str, packets: List[Dict]) -> bool:
     """
-    Позначаємо tracks як помилка (sent = -1, error)
-    """
-    try:
-        conn = sqlite3.connect(db_file)
-        cursor = conn.cursor()
-        
-        for track_id in track_ids:
-            cursor.execute(
-                "UPDATE flight_tracks SET sent = -1, error = ? WHERE id = ?",
-                (error_msg, track_id)
-            )
-        
-        conn.commit()
-        conn.close()
-        
-        return True
+    Відправляємо batch пакетів на API з HMAC підписом
     
-    except Exception as e:
-        logger.error(f"Помилка при позначенні помилок: {e}")
-        return False
-
-
-async def send_tracks_to_api(config: Dict, db_file: str, tracks: List[Dict], time_offset=0.0) -> bool:
-    """
-    Відправляємо batch flight_tracks на API з HMAC підписом
-    
-    API Endpoint: POST /api/tracks
+    API Endpoint: POST /api/packets
     Payload:
     {
         "client_id": "...",
-        "tracks": [
-            {"callsign": "...", "height": ..., "fuel": ..., "timestamp": "..."},
-            ...
-        ]
+        "create": [ ... ],
+        "update": [ ... ]
     }
     """
     
-    if not tracks:
+    if not packets:
         return True
     
     try:
+        # Розділяємо на create та update
+        create_list = []
+        update_list = []
+        
+        for p in packets:
+            packet_data = {
+                'uuid': p['uuid'],
+                'event_time': p['event_time'],
+                'type': p['type'],
+                'callsign': p['callsign'],
+                'height': p['height'],
+                'fuel': p['fuel'],
+                'alarm': p['alarm'],
+                'faithfulness': p['faithfulness']
+            }
+            
+            if p['sent'] == 0:
+                create_list.append(packet_data)
+            elif p['sent'] == 2:
+                update_list.append(packet_data)
+        
         # Підготовка payload
         payload = {
             'client_id': config['api']['client_id'],
-            'tracks': [
-                {
-                    'callsign': track['callsign'],
-                    'height': track['height'],
-                    'fuel': track['fuel'],
-                    'timestamp': track['timestamp']
-                }
-                for track in tracks
-            ]
+            'create': create_list,
+            'update': update_list
         }
         
         # Сериалізуємо в JSON для підпису
@@ -199,32 +179,34 @@ async def send_tracks_to_api(config: Dict, db_file: str, tracks: List[Dict], tim
         }
         
         # Відправляємо запит
-        url = f"{config['api']['url']}/api/tracks"
+        url = f"{config['api']['url']}/api/packets" # Припускаємо новий endpoint
         
-        logger.info(f"[SENDER] Відправка {len(tracks)} tracks на {url}")
+        logger.info(f"[SENDER] Відправка: Create={len(create_list)}, Update={len(update_list)} на {url}")
         
         # Використовуємо requests в async контексті
         loop = asyncio.get_event_loop()
+        timeout = config['api'].get('timeout', 30)
+        
         response = await loop.run_in_executor(
             None,
             lambda: requests.post(
                 url,
                 data=payload_json,
                 headers=headers,
-                timeout=10
+                timeout=timeout
             )
         )
         
         # Перевіряємо статус відповіді
         if response.status_code == 200:
-            logger.info(f"[SENDER] ✓ Успішно надіслано {len(tracks)} tracks")
+            logger.info(f"[SENDER] ✓ Успішно синхронізовано {len(packets)} пакетів")
             
             # Позначаємо як надіслані
-            track_ids = [track['track_id'] for track in tracks]
-            mark_tracks_as_sent(db_file, track_ids, time_offset)
+            uuids = [p['uuid'] for p in packets]
+            mark_packets_as_synced(db_file, uuids)
             
-            log_to_db(db_file, 'INFO', 'SENDER', f'Надіслано {len(tracks)} tracks',
-                     json.dumps({'count': len(tracks)}))
+            log_to_db(db_file, 'INFO', 'SENDER', f'Синхронізовано {len(packets)} пакетів',
+                     json.dumps({'create': len(create_list), 'update': len(update_list)}))
             
             return True
         
@@ -260,10 +242,10 @@ async def sender_loop(config: Dict, db_file: str, app_state):
     Дані залишаються в БД до успішної відправки.
     
     Логіка:
-    1. Отримуємо batch пакетів з sent = 0
+    1. Отримуємо batch пакетів з sent IN (0, 2)
     2. Спробуємо надіслати на API
     3. При успіху позначаємо sent = 1
-    4. При помилці (інтернет, timeout, API) залишаємо sent = 0 та продовжуємо
+    4. При помилці (інтернет, timeout, API) залишаємо статус як є та продовжуємо
     5. Чекаємо наступного циклу
     """
     
@@ -277,7 +259,7 @@ async def sender_loop(config: Dict, db_file: str, app_state):
     app_state.sender_state['last_error'] = None
     
     sender_interval = config['cycles'].get('sender_interval', 3)
-    batch_size = config['cycles'].get('batch_size', BATCH_SIZE)
+    batch_size = config['cycles'].get('batch_size', 100)
     
     total_sent = 0
     failed_count = 0
@@ -285,30 +267,32 @@ async def sender_loop(config: Dict, db_file: str, app_state):
     while True:
         try:
             # Отримуємо pending пакети
-            tracks = get_pending_tracks(db_file, batch_size)
+            packets = get_pending_packets(db_file, batch_size)
             
-            if not tracks:
+            if not packets:
                 await asyncio.sleep(sender_interval)
                 continue
             
             # Спробуємо надіслати batch
-            success = await send_tracks_to_api(config, db_file, tracks, app_state.time_offset)
+            success = await send_packets_to_api(config, db_file, packets)
             
             if success:
-                total_sent += len(tracks)
+                total_sent += len(packets)
                 failed_count = 0  # Скидаємо лічильник при успіху
-                import time
                 app_state.sender_state['last_run'] = int(time.time())
-                app_state.sender_state['packets_sent'] = len(tracks)
+                app_state.sender_state['packets_sent'] = len(packets)
                 app_state.sender_state['last_error'] = None
-                logger.info(f"[SENDER] Статистика: всього надіслано {total_sent} tracks")
+                logger.info(f"[SENDER] Статистика: всього синхронізовано {total_sent} пакетів")
+                await asyncio.sleep(sender_interval)
             else:
                 failed_count += 1
                 app_state.sender_state['last_error'] = 'Помилка при відправці'
                 if failed_count % 5 == 0:  # Логуємо кожні 5 невдач
                     logger.warning(f"[SENDER] {failed_count} неудалих спроб — дані збережені в БД")
-            
-            await asyncio.sleep(sender_interval)
+                
+                # При помилці чекаємо retry_delay
+                retry_delay = config['api'].get('retry_delay', 5)
+                await asyncio.sleep(retry_delay)
         
         except KeyboardInterrupt:
             app_state.sender_state['running'] = False

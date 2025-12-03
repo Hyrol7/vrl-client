@@ -11,6 +11,8 @@ import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import uuid
+
 logger = logging.getLogger(__name__)
 
 # Регулярні вирази для парсингу
@@ -70,6 +72,7 @@ def parse_k1_packet(line, db_file, time_offset=0.0):
         event_time = f"{get_local_date(time_offset)} {hours}:{minutes}:{seconds}"
         
         return {
+            'uuid': str(uuid.uuid4()),
             'event_time': event_time,
             'type': 1,  # K1
             'callsign': callsign,
@@ -77,7 +80,7 @@ def parse_k1_packet(line, db_file, time_offset=0.0):
             'fuel': None,
             'alarm': 0,
             'faithfulness': 50,
-            'sent': 1,
+            'sent': 0,  # 0 = Готовий до створення
         }
     
     except Exception as e:
@@ -105,6 +108,7 @@ def parse_k2_packet(line, db_file, time_offset=0.0):
         event_time = f"{get_local_date(time_offset)} {hours}:{minutes}:{seconds}"
         
         return {
+            'uuid': str(uuid.uuid4()),
             'event_time': event_time,
             'type': 2,  # K2
             'callsign': None,
@@ -112,7 +116,7 @@ def parse_k2_packet(line, db_file, time_offset=0.0):
             'fuel': fuel,
             'alarm': 0,
             'faithfulness': 0,
-            'sent': 0,
+            'sent': -1,  # -1 = Очікує аналізу (не відправляти)
         }
     
     except Exception as e:
@@ -146,9 +150,10 @@ def save_packet_to_db(db_file, packet):
         
         cursor.execute(
             """INSERT INTO packets 
-               (event_time, type, callsign, height, fuel, alarm, faithfulness, sent)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+               (uuid, event_time, type, callsign, height, fuel, alarm, faithfulness, sent)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
+                packet['uuid'],
                 packet['event_time'],
                 packet['type'],
                 packet['callsign'],
@@ -191,6 +196,7 @@ async def flush_packets(db_file, packets_buffer, total_packets):
         # Батч-запис: executemany() одним запитом (набагато швидше!)
         data = [
             (
+                packet['uuid'],
                 packet['event_time'],
                 packet['type'],
                 packet['callsign'],
@@ -205,8 +211,8 @@ async def flush_packets(db_file, packets_buffer, total_packets):
         
         cursor.executemany(
             """INSERT INTO packets 
-               (event_time, type, callsign, height, fuel, alarm, faithfulness, sent)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               (uuid, event_time, type, callsign, height, fuel, alarm, faithfulness, sent)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             data
         )
         
