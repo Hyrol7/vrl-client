@@ -142,6 +142,66 @@ def get_system_metrics(db_file):
         return {}
 
 
+def collect_full_status(app_state):
+    """
+    Збираємо повний статус програми з app_state та системних метрик
+    
+    ПАРАМЕТРИ:
+        - app_state: глобальний об'єкт стану
+    
+    ПОВЕРТАЄ:
+        - dict: повний словник статусу для запису в БД та відправки
+    """
+    try:
+        # Збираємо системні метрики
+        metrics = get_system_metrics(app_state.db_file)
+        
+        # Обчислюємо uptime
+        uptime = 0
+        if app_state.start_time:
+            import time
+            uptime = int(time.time() - app_state.start_time)
+        
+        # Формуємо status_data
+        status_data = {
+            'parser_running': app_state.parser_state['running'],
+            'parser_connected': app_state.parser_state['connected'],
+            'parser_packets_total': app_state.parser_state['packets_total'],
+            'parser_packets_last_flush': app_state.parser_state['packets_last_flush'],
+            'parser_buffer_size': app_state.parser_state['buffer_size'],
+            'parser_last_error': app_state.parser_state['last_error'],
+            
+            'analyser_running': app_state.analyser_state['running'],
+            'analyser_last_run': app_state.analyser_state['last_run'],
+            'analyser_packets_processed': app_state.analyser_state['packets_processed'],
+            'analyser_last_error': app_state.analyser_state['last_error'],
+            
+            'sender_running': app_state.sender_state['running'],
+            'sender_last_run': app_state.sender_state['last_run'],
+            'sender_packets_sent': app_state.sender_state['packets_sent'],
+            'sender_last_error': app_state.sender_state['last_error'],
+            
+            'ping_handler_running': app_state.ping_handler_state['running'],
+            'ping_handler_last_run': app_state.ping_handler_state['last_run'],
+            'ping_handler_last_error': app_state.ping_handler_state['last_error'],
+            
+            'total_packets_in_db': metrics.get('total_packets_in_db', 0),
+            'total_logs_in_db': metrics.get('total_logs_in_db', 0),
+            'db_size_bytes': metrics.get('db_size_bytes', 0),
+            
+            'uptime_seconds': uptime,
+            'memory_usage_mb': metrics.get('memory_usage_mb', 0),
+            'last_error': None,
+            
+            'app_version': app_state.config.get('app', {}).get('version', '0.1.0'),
+        }
+        
+        return status_data
+    except Exception as e:
+        logger.error(f"[STATUS_MANAGER] Помилка при збиранні повного статусу: {e}")
+        return {}
+
+
 def format_status_json(status_record):
     """
     Формуємо JSON статус для API

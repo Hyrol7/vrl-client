@@ -79,7 +79,7 @@ def get_unmatched_packets(db_file, limit=1000):
         return [], []
 
 
-def create_flight_track(db_file, k1_id, k1_callsign, k1_time, k2_id, k2_height, k2_fuel, k2_time):
+def create_flight_track(db_file, k1_id, k1_callsign, k1_time, k2_id, k2_height, k2_fuel, k2_time, time_offset=0.0):
     """
     Створюємо запис flight_track з біндених K1 та K2
     """
@@ -87,12 +87,17 @@ def create_flight_track(db_file, k1_id, k1_callsign, k1_time, k2_id, k2_height, 
         conn = sqlite3.connect(db_file)
         cursor = conn.cursor()
         
+        # Розраховуємо правильний час створення
+        now = datetime.now()
+        if time_offset != 0:
+            now = now + timedelta(seconds=time_offset)
+        
         # Створюємо flight_track
         cursor.execute("""
             INSERT INTO flight_tracks 
             (k1_packet_id, k2_packet_id, callsign, height, fuel, timestamp, sent)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (k1_id, k2_id, k1_callsign, k2_height, k2_fuel, datetime.now().isoformat(), 0))
+        """, (k1_id, k2_id, k1_callsign, k2_height, k2_fuel, now.isoformat(), 0))
         
         track_id = cursor.lastrowid
         
@@ -110,7 +115,7 @@ def create_flight_track(db_file, k1_id, k1_callsign, k1_time, k2_id, k2_height, 
         return None
 
 
-def match_k1_k2_packets(db_file, k1_packets, k2_packets):
+def match_k1_k2_packets(db_file, k1_packets, k2_packets, time_offset=0.0):
     """
     Біндимо K1 та K2 пакети в часовому вікні (TIME_WINDOW секунд)
     
@@ -151,7 +156,8 @@ def match_k1_k2_packets(db_file, k1_packets, k2_packets):
             
             track_id = create_flight_track(
                 db_file, k1_id, k1_callsign, k1_time, 
-                k2_id, k2_height, k2_fuel, k2_time
+                k2_id, k2_height, k2_fuel, k2_time,
+                time_offset
             )
             
             if track_id:
@@ -220,7 +226,7 @@ async def analyser_loop(config, db_file, app_state):
                 continue
             
             # Біндимо K1↔K2
-            matches = match_k1_k2_packets(db_file, k1_packets, k2_packets)
+            matches = match_k1_k2_packets(db_file, k1_packets, k2_packets, app_state.time_offset)
             
             if matches:
                 total_matches += len(matches)

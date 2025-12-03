@@ -93,7 +93,7 @@ def get_pending_tracks(db_file, limit: int = BATCH_SIZE) -> List[Dict]:
         return []
 
 
-def mark_tracks_as_sent(db_file, track_ids: List[int]) -> bool:
+def mark_tracks_as_sent(db_file, track_ids: List[int], time_offset=0.0) -> bool:
     """
     Позначаємо tracks як надіслані (sent = 1)
     """
@@ -101,10 +101,14 @@ def mark_tracks_as_sent(db_file, track_ids: List[int]) -> bool:
         conn = sqlite3.connect(db_file)
         cursor = conn.cursor()
         
+        now = datetime.now()
+        if time_offset != 0:
+            now = now + timedelta(seconds=time_offset)
+        
         for track_id in track_ids:
             cursor.execute(
                 "UPDATE flight_tracks SET sent = 1, sent_at = ? WHERE id = ?",
-                (datetime.now().isoformat(), track_id)
+                (now.isoformat(), track_id)
             )
         
         conn.commit()
@@ -141,7 +145,7 @@ def mark_tracks_as_failed(db_file, track_ids: List[int], error_msg: str) -> bool
         return False
 
 
-async def send_tracks_to_api(config: Dict, db_file: str, tracks: List[Dict]) -> bool:
+async def send_tracks_to_api(config: Dict, db_file: str, tracks: List[Dict], time_offset=0.0) -> bool:
     """
     Відправляємо batch flight_tracks на API з HMAC підписом
     
@@ -217,7 +221,7 @@ async def send_tracks_to_api(config: Dict, db_file: str, tracks: List[Dict]) -> 
             
             # Позначаємо як надіслані
             track_ids = [track['track_id'] for track in tracks]
-            mark_tracks_as_sent(db_file, track_ids)
+            mark_tracks_as_sent(db_file, track_ids, time_offset)
             
             log_to_db(db_file, 'INFO', 'SENDER', f'Надіслано {len(tracks)} tracks',
                      json.dumps({'count': len(tracks)}))
@@ -288,7 +292,7 @@ async def sender_loop(config: Dict, db_file: str, app_state):
                 continue
             
             # Спробуємо надіслати batch
-            success = await send_tracks_to_api(config, db_file, tracks)
+            success = await send_tracks_to_api(config, db_file, tracks, app_state.time_offset)
             
             if success:
                 total_sent += len(tracks)

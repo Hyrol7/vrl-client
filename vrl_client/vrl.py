@@ -33,11 +33,11 @@ from pathlib import Path
 from initialization import check_dependencies, load_config, init_database, log_to_db, update_decoder_ini
 from time_sync import sync_system_time
 from decoder import start_decoder, stop_decoder
-from ping_handler import PingStatus, ping_loop
+from ping_handler import PingStatus, send_full_status
 from parser import parser_loop
 from analyser import analyser_loop
 from sender import sender_loop
-from status_manager import update_status, get_latest_status, get_system_metrics, format_status_json
+from status_manager import update_status, get_latest_status, get_system_metrics, format_status_json, collect_full_status
 from datetime import datetime
 
 # ============================================================
@@ -149,76 +149,69 @@ async def time_sync_loop(config):
 
 
 # ============================================================
-# STATUS REPORTER - ЗАПИС СТАТУСУ КОЖНІ 30 СЕК
+# UNIFIED MONITORING LOOP - ЗБІР СТАТУСУ ТА ВІДПРАВКА НА СЕРВЕР
 # ============================================================
 
-async def status_reporter_loop(app_state):
+async def unified_monitoring_loop(app_state):
     """
-    Кожні 30 сек:
-    1. Збираємо стан всіх компонентів
-    2. Записуємо в таблицю status
-    3. Логуємо
+    Єдиний цикл моніторингу:
+    1. Чекаємо інтервал (30с)
+    2. Збираємо повний статус (collect_full_status)
+    3. Записуємо в локальну БД (update_status)
+    4. Відправляємо на сервер (send_full_status)
     """
-    status_interval = app_state.config.get('api', {}).get('status_interval', 30)
+    # Ініціалізуємо стан ping_handler
+    app_state.ping_handler_state['running'] = True
+    app_state.ping_handler_state['last_run'] = None
+    app_state.ping_handler_state['last_error'] = None
     
-    logger.info(f"[STATUS] Запуск status_reporter (інтервал {status_interval}s)")
+    interval = app_state.config.get('api', {}).get('status_interval', 30)
+    logger.info(f"[MONITOR] Запуск єдиного циклу моніторингу (інтервал {interval}s)")
+    
+    failed_count = 0
     
     while True:
         try:
-            await asyncio.sleep(status_interval)
+            await asyncio.sleep(interval)
             
-            # Збираємо стан
-            metrics = get_system_metrics(app_state.db_file)
+            # 1. Збираємо повний статус
+            status_data = collect_full_status(app_state)
             
-            # Обчислюємо uptime
-            uptime = 0
-            if app_state.start_time:
-                import time
-                uptime = int(time.time() - app_state.start_time)
+            # Додаємо timestamp з урахуванням offset для відправки
+            from datetime import timedelta
+            current_utc = datetime.utcnow() + timedelta(seconds=app_state.time_offset)
+            status_data['timestamp'] = current_utc.isoformat() + 'Z'
             
-            # Формуємо status_data
-            status_data = {
-                'parser_running': app_state.parser_state['running'],
-                'parser_connected': app_state.parser_state['connected'],
-                'parser_packets_total': app_state.parser_state['packets_total'],
-                'parser_packets_last_flush': app_state.parser_state['packets_last_flush'],
-                'parser_buffer_size': app_state.parser_state['buffer_size'],
-                'parser_last_error': app_state.parser_state['last_error'],
-                
-                'analyser_running': app_state.analyser_state['running'],
-                'analyser_last_run': app_state.analyser_state['last_run'],
-                'analyser_packets_processed': app_state.analyser_state['packets_processed'],
-                'analyser_last_error': app_state.analyser_state['last_error'],
-                
-                'sender_running': app_state.sender_state['running'],
-                'sender_last_run': app_state.sender_state['last_run'],
-                'sender_packets_sent': app_state.sender_state['packets_sent'],
-                'sender_last_error': app_state.sender_state['last_error'],
-                
-                'ping_handler_running': app_state.ping_handler_state['running'],
-                'ping_handler_last_run': app_state.ping_handler_state['last_run'],
-                'ping_handler_last_error': app_state.ping_handler_state['last_error'],
-                
-                'total_packets_in_db': metrics.get('total_packets_in_db', 0),
-                'total_logs_in_db': metrics.get('total_logs_in_db', 0),
-                'db_size_bytes': metrics.get('db_size_bytes', 0),
-                
-                'uptime_seconds': uptime,
-                'memory_usage_mb': metrics.get('memory_usage_mb', 0),
-                'last_error': None,
-                
-                'app_version': app_state.config.get('app', {}).get('version', '0.1.0'),
-            }
-            
-            # Записуємо в БД
+            # 2. Записуємо в локальну БД
             if update_status(app_state.db_file, status_data, app_state.time_offset):
-                logger.info("[STATUS] ✓ Статус записаний в БД")
+                # logger.debug("[MONITOR] Статус записаний в локальну БД")
+                pass
             else:
-                logger.warning("[STATUS] ✗ Не вдалось записати статус")
+                logger.warning("[MONITOR] ✗ Не вдалось записати статус в БД")
+            
+            # 3. Відправляємо на сервер
+            success = send_full_status(status_data, app_state.config, app_state.db_file)
+            
+            if success:
+                import time
+                failed_count = 0
+                app_state.ping_handler_state['last_run'] = int(time.time())
+                app_state.ping_handler_state['last_error'] = None
+                # logger.info("[MONITOR] ✓ Статус успішно синхронізовано з сервером")
+            else:
+                failed_count += 1
+                app_state.ping_handler_state['last_error'] = 'Помилка при відправці статусу'
+                if failed_count % 5 == 0:
+                    logger.warning(f"[MONITOR] {failed_count} невдалих спроб відправки статусу")
         
+        except KeyboardInterrupt:
+            app_state.ping_handler_state['running'] = False
+            break
+            
         except Exception as e:
-            logger.error(f"[STATUS] Критична помилка: {e}")
-            await asyncio.sleep(status_interval)
+            logger.error(f"[MONITOR] Критична помилка: {e}")
+            app_state.ping_handler_state['last_error'] = str(e)[:100]
+            await asyncio.sleep(interval)
 
 
 # ============================================================
@@ -366,8 +359,7 @@ async def main():
     # Створюємо всі фонові завдання (включно з status_reporter)
     tasks = [
         asyncio.create_task(time_sync_loop(config)),
-        asyncio.create_task(status_reporter_loop(app_state)),
-        asyncio.create_task(ping_loop(app_state.ping_status, db_file, app_state)),
+        asyncio.create_task(unified_monitoring_loop(app_state)),
         asyncio.create_task(parser_loop(config, db_file, app_state)),
         asyncio.create_task(analyser_loop(config, db_file, app_state)),
         asyncio.create_task(sender_loop(config, db_file, app_state)),

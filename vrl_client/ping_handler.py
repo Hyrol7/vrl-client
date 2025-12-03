@@ -91,14 +91,14 @@ def generate_status_ping(ping_status, time_offset=0):
     return ping_status.to_dict(time_offset)
 
 
-def send_status_ping(ping_status, db_file, time_offset=0):
+def send_full_status(status_data, config, db_file):
     """
-    Відправляємо статус на API сервер (ping)
+    Відправляємо повний статус на API сервер
     
     ПАРАМЕТРИ:
-        - ping_status: об'єкт PingStatus
+        - status_data: dict з повним статусом
+        - config: конфігурація
         - db_file: шлях до БД (для логування)
-        - time_offset: зміщення часу в секундах
     
     ПОВЕРТАЄ:
         - True/False: успіх відправки
@@ -106,11 +106,8 @@ def send_status_ping(ping_status, db_file, time_offset=0):
     try:
         import requests
         
-        config = ping_status.config
-        ping_data = generate_status_ping(ping_status, time_offset)
-        
         # Генеруємо HMAC сигнатуру
-        payload_str = json.dumps(ping_data, sort_keys=True)
+        payload_str = json.dumps(status_data, sort_keys=True)
         signature = hmac.new(
             config['api']['secret_key'].encode(),
             payload_str.encode(),
@@ -125,16 +122,13 @@ def send_status_ping(ping_status, db_file, time_offset=0):
         
         response = requests.post(
             config['api'].get('status_url', config['api']['url']),
-            json=ping_data,
+            json=status_data,
             headers=headers,
             timeout=config['api']['timeout']
         )
         
         if response.status_code in [200, 201]:
             logger.debug(f"✓ Статус надіслано на API: {response.status_code}")
-            
-            from initialization import log_to_db
-            log_to_db(db_file, 'INFO', 'PING', 'Статус надіслано', f"Status: {response.status_code}")
             return True
         else:
             logger.warning(f"⚠ API відповіді: {response.status_code}")
@@ -154,53 +148,4 @@ def send_status_ping(ping_status, db_file, time_offset=0):
         return False
 
 
-async def ping_loop(ping_status, db_file, app_state):
-    """
-    Периодично відправляємо статус на API сервер (нескінченний цикл)
-    
-    При помилці не падає в аварію, а чекає наступного циклу.
-    
-    ПАРАМЕТРИ:
-        - ping_status: об'єкт PingStatus
-        - db_file: шлях до БД (для логування)
-        - app_state: об'єкт AppState для оновлення стану
-    
-    ПОВЕРТАЄ:
-        - Ніколи (нескінченний цикл, поки програма працює)
-    """
-    # Ініціалізуємо стан ping_handler
-    app_state.ping_handler_state['running'] = True
-    app_state.ping_handler_state['last_run'] = None
-    app_state.ping_handler_state['last_error'] = None
-    
-    ping_interval = ping_status.config['api'].get('ping_interval', 30)
-    failed_count = 0
-    
-    logger.info(f"[PING] Запущений цикл (інтервал: {ping_interval}с)")
-    
-    while True:
-        try:
-            await asyncio.sleep(ping_interval)
-            
-            # Спробуємо надіслати ping
-            success = send_status_ping(ping_status, db_file, app_state.time_offset)
-            
-            if success:
-                import time
-                failed_count = 0  # Скидаємо лічильник при успіху
-                app_state.ping_handler_state['last_run'] = int(time.time())
-                app_state.ping_handler_state['last_error'] = None
-            else:
-                failed_count += 1
-                app_state.ping_handler_state['last_error'] = 'Помилка при відправці ping'
-                if failed_count % 5 == 0:  # Логуємо кожні 5 невдач
-                    logger.warning(f"[PING] {failed_count} неудалих спроб надіслати статус")
-        
-        except KeyboardInterrupt:
-            app_state.ping_handler_state['running'] = False
-            logger.info("[PING] Цикл зупинений")
-            break
-        
-        except Exception as e:
-            logger.error(f"[PING] Критична помилка в циклі: {e}")
-            app_state.ping_handler_state['last_error'] = str(e)[:100]
+

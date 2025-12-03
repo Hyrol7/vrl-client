@@ -28,7 +28,8 @@ DEFAULT_CONFIG = {
         'timezone': 'Europe/Kiev',
     },
     'decoder': {
-        'path': 'C:\\Users\\User\\Downloads\\rtluvd\\', # шлях до директорії з програмою
+        'path': 'C:\\Users\\User\\Downloads\\rtluvd\\', # шлях до директорії з програмою (Windows)
+        # 'path': '/Users/user/Downloads/rtluvd/',      # приклад для macOS/Linux
         'app_decoder': 'uvd_rtl.exe',   # назва файлу програми
         'command_args': '/tcp',         # аргументи запуску програми
         'host': '127.0.0.1',            # хост
@@ -44,8 +45,7 @@ DEFAULT_CONFIG = {
         'secret_key': 'your-secret-key-here',
         'bearer_token': 'your-bearer-token-here',
         'timeout': 30,
-        'ping_interval': 30,
-        'status_interval': 30,    # сек - запис статусу в БД (синхро з ping)
+        'status_interval': 30,    # сек - запис статусу в БД та відправка на сервер
     },
     'database': {
         'file': 'base.db',
