@@ -54,6 +54,7 @@ def build_exe():
         '--hidden-import=requests',     # Include requests
         '--hidden-import=ntplib',       # Include ntplib
         '--hidden-import=sqlite3',      # Include sqlite3
+        '--hidden-import=psutil',       # Include psutil
         '--collect-all=yaml',
         '--collect-all=requests',
         '--collect-all=urllib3',

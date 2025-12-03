@@ -25,25 +25,13 @@ jobs:
     
     - name: Build executable with PyInstaller
       run: |
-        cd vrl_client
-        pyinstaller --onefile ^
-          --name "VRL_Client" ^
-          --hidden-import=psutil ^
-          --hidden-import=requests ^
-          --hidden-import=yaml ^
-          --hidden-import=sqlite3 ^
-          --hidden-import=ntplib ^
-          --collect-all=yaml ^
-          --collect-all=requests ^
-          --collect-all=sqlite3 ^
-          --distpath "..\dist" ^
-          vrl.py
+        python vrl_client/build_exe.py
     
     - name: Create Release
       if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v1
       with:
-        files: dist/VRL_Client.exe
+        files: vrl_client/dist/VRL_Client.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     
@@ -52,4 +40,4 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: VRL_Client-windows
-        path: dist/VRL_Client.exe
+        path: vrl_client/dist/VRL_Client.exe
