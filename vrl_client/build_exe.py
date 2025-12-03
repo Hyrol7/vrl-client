@@ -53,12 +53,14 @@ def build_exe():
         '--hidden-import=yaml',         # Include yaml
         '--hidden-import=requests',     # Include requests
         '--hidden-import=ntplib',       # Include ntplib
+        '--hidden-import=sqlite3',      # Include sqlite3
         '--collect-all=yaml',
         '--collect-all=requests',
         '--collect-all=urllib3',
         '--collect-all=certifi',
         '--collect-all=chardet',
         '--collect-all=idna',
+        '--collect-all=sqlite3',
     ]
     
     print("Running PyInstaller...")
