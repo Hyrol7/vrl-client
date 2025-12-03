@@ -269,60 +269,50 @@ def init_database(config):
     logger.info("═" * 60)
     
     db_file = Path(__file__).parent / config['database']['file']
-    
-    # Якщо файл БД відсутній
-    if not db_file.exists():
-        logger.info(f"  ⚠ {db_file.name} не знайдена")
-        logger.info(f"  → Створюємо нову БД...")
-        
-        try:
-            conn = sqlite3.connect(str(db_file))
-            cursor = conn.cursor()
-            cursor.executescript(DB_SCHEMA)
-            conn.commit()
-            conn.close()
-            
-            logger.info(f"  ✓ БД створена: {db_file}")
-            logger.info(f"     Таблиці: packets_raw, logs\n")
-            
-            return str(db_file)
-        
-        except Exception as e:
-            logger.error(f"  ❌ ПОМИЛКА при створенні БД: {e}\n")
-            sys.exit(1)
-    
-    # Файл існує — перевіряємо структуру
-    logger.info(f"  ✓ {db_file.name} знайдена")
-    logger.info(f"  → Перевіряємо структуру...")
+    file_exists = db_file.exists()
     
     try:
         conn = sqlite3.connect(str(db_file))
         cursor = conn.cursor()
         
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='packets_raw'")
-        packets_table = cursor.fetchone()
+        # Перевіряємо, які таблиці вже є
+        required_tables = ['packets_raw', 'logs', 'status']
+        existing_tables = []
         
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='logs'")
-        logs_table = cursor.fetchone()
+        for table in required_tables:
+            cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'")
+            if cursor.fetchone():
+                existing_tables.append(table)
         
-        if not packets_table or not logs_table:
-            raise ValueError("Структура БД пошкоджена (відсутні необхідні таблиці)")
+        missing_tables = [t for t in required_tables if t not in existing_tables]
         
+        if not file_exists:
+            logger.info(f"  ⚠ {db_file.name} не знайдена")
+            logger.info(f"  → Створюємо нову БД...")
+            cursor.executescript(DB_SCHEMA)
+            conn.commit()
+            logger.info(f"  ✓ БД створена успішно")
+            
+        elif missing_tables:
+            logger.info(f"  ⚠ {db_file.name} знайдена, але неповна")
+            logger.info(f"  → Відсутні таблиці: {', '.join(missing_tables)}")
+            logger.info(f"  → Додаємо відсутні таблиці...")
+            cursor.executescript(DB_SCHEMA)
+            conn.commit()
+            logger.info(f"  ✓ БД оновлена успішно")
+            
+        else:
+            logger.info(f"  ✓ {db_file.name} знайдена")
+            logger.info(f"  ✓ Всі таблиці на місці ({', '.join(existing_tables)})")
+            
         conn.close()
-        
-        logger.info(f"  ✓ Структура БД перевірена")
-        logger.info(f"     Таблиці: packets_raw, logs")
-        logger.info(f"     Файл: {db_file}\n")
-        
         return str(db_file)
-    
+        
     except Exception as e:
-        logger.error(f"  ❌ ПОМИЛКА: {e}\n")
+        logger.error(f"  ❌ ПОМИЛКА при ініціалізації БД: {e}\n")
         sys.exit(1)
 
 
-# ============================================================
-# ЛОГУВАННЯ В БД
 # ============================================================
 # КОНФІГУРАЦІЯ ДЕКОДЕРА
 # ============================================================
@@ -353,7 +343,7 @@ def update_decoder_ini(config):
         ini_file = decoder_dir / 'rtluvd.ini'
         
         if not ini_file.exists():
-            logger.warning(f"  ⚠ Файл не знайдена: {ini_file}")
+            logger.warning(f"  ⚠ Файл не знайдений: {ini_file}")
             logger.warning(f"     Ініціалізація декодера буде пропущена")
             logger.info()
             return False
