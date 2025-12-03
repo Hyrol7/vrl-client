@@ -298,8 +298,9 @@ async def parser_loop(config, db_file, app_state):
                     logger.warning("[PARSER] З'єднання розірвано! Перепідключаємся...")
                     log_to_db(db_file, 'WARNING', 'PARSER', 'З\'єднання розірвано')
                     connected = False
+                    app_state.parser_state['connected'] = False
                 
-                logger.info(f"[PARSER] Спроба переподключення (затримка {reconnect_delay}s)...")
+                logger.info(f"[PARSER] Спроба підключення (чекаємо {reconnect_delay}s)...")
                 await asyncio.sleep(reconnect_delay)
                 
                 reader, writer = await connect_to_decoder(config)
@@ -314,7 +315,9 @@ async def parser_loop(config, db_file, app_state):
                     # ⚠️ НЕ скидаємо last_flush_time тут! Залишаємо таймер як є
                     continue
                 else:
-                    logger.warning("[PARSER] Не вдалось підключитись, спробуємо знову...")
+                    # Логуємо невдалу спробу тільки якщо це перша спроба або пройшло багато часу
+                    # щоб не спамити в логи кожні 3 секунди
+                    logger.warning("[PARSER] Не вдалось підключитись, декодер ще не готовий...")
                     continue
             
             # Постійно очікуємо дані (БЕЗ timeout, БЕЗ затримок)
@@ -358,8 +361,17 @@ async def parser_loop(config, db_file, app_state):
                 current_time = asyncio.get_event_loop().time()
                 if current_time - last_flush_time >= buffer_interval and packets_buffer:
                     total_packets = await flush_packets(db_file, packets_buffer, total_packets)
+                    
+                    # Оновлюємо статистику в app_state після успішного запису
+                    app_state.parser_state['packets_total'] = total_packets
+                    app_state.parser_state['packets_last_flush'] = len(packets_buffer)
+                    app_state.parser_state['buffer_size'] = 0
+                    
                     packets_buffer = []
                     last_flush_time = current_time
+                
+                # Оновлюємо поточний розмір буфера в app_state (для моніторингу)
+                app_state.parser_state['buffer_size'] = len(packets_buffer)
                 
             except ConnectionResetError as e:
                 logger.error(f"[PARSER] Розрив з'єднання: {e}")
