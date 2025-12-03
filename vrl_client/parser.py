@@ -77,6 +77,7 @@ def parse_k1_packet(line, db_file, time_offset=0.0):
             'fuel': None,
             'alarm': 0,
             'faithfulness': 50,
+            'sent': 1,
         }
     
     except Exception as e:
@@ -111,6 +112,7 @@ def parse_k2_packet(line, db_file, time_offset=0.0):
             'fuel': fuel,
             'alarm': 0,
             'faithfulness': 0,
+            'sent': 0,
         }
     
     except Exception as e:
@@ -143,8 +145,8 @@ def save_packet_to_db(db_file, packet):
         cursor = conn.cursor()
         
         cursor.execute(
-            """INSERT INTO packets_raw 
-               (event_time, type, callsign, height, fuel, alarm, faithfulness)
+            """INSERT INTO packets 
+               (event_time, type, callsign, height, fuel, alarm, faithfulness, sent)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
                 packet['event_time'],
@@ -154,6 +156,7 @@ def save_packet_to_db(db_file, packet):
                 packet['fuel'],
                 packet['alarm'],
                 packet['faithfulness'],
+                packet['sent'],
             )
         )
         
@@ -195,14 +198,15 @@ async def flush_packets(db_file, packets_buffer, total_packets):
                 packet['fuel'],
                 packet['alarm'],
                 packet['faithfulness'],
+                packet['sent'],
             )
             for packet in packets_buffer
         ]
         
         cursor.executemany(
-            """INSERT INTO packets_raw 
-               (event_time, type, callsign, height, fuel, alarm, faithfulness)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO packets 
+               (event_time, type, callsign, height, fuel, alarm, faithfulness, sent)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             data
         )
         

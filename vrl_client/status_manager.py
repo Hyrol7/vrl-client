@@ -119,7 +119,7 @@ def get_system_metrics(db_file):
             conn = sqlite3.connect(db_file)
             cursor = conn.cursor()
             
-            cursor.execute("SELECT COUNT(*) FROM packets_raw")
+            cursor.execute("SELECT COUNT(*) FROM packets")
             total_packets = cursor.fetchone()[0]
             
             cursor.execute("SELECT COUNT(*) FROM logs")
