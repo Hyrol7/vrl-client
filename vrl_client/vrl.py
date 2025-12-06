@@ -44,11 +44,20 @@ from datetime import datetime
 # ЛОГУВАННЯ
 # ============================================================
 
+# Визначаємо шлях до лог-файлу (поруч з exe або скриптом)
+if getattr(sys, 'frozen', False):
+    base_path = Path(sys.executable).parent
+else:
+    base_path = Path(__file__).parent
+
+log_file = base_path / 'vrl_client.log'
+
 logging.basicConfig(
     level=logging.INFO,
     format='[%(asctime)s] %(levelname)s: %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout),
+        logging.FileHandler(log_file, encoding='utf-8')
     ]
 )
 logger = logging.getLogger(__name__)
@@ -376,13 +385,23 @@ async def main():
 # ============================================================
 
 if __name__ == '__main__':
+    exit_code = 0
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("\n[!] Програма завершена користувачем")
-        sys.exit(0)
     except Exception as e:
         logger.error(f"\n❌ КРИТИЧНА ПОМИЛКА: {e}")
         import traceback
-        traceback.print_exc()
-        sys.exit(1)
+        logger.error(traceback.format_exc())
+        print("\n❌ КРИТИЧНА ПОМИЛКА! Дивіться деталі вище або в vrl_client.log")
+        exit_code = 1
+    finally:
+        # Якщо запущено як EXE, чекаємо натискання клавіші перед виходом
+        if getattr(sys, 'frozen', False):
+            print("\nНатисніть Enter, щоб вийти...")
+            try:
+                input()
+            except:
+                pass
+        sys.exit(exit_code)
