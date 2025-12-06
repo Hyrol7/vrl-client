@@ -162,7 +162,7 @@ def check_dependencies():
     logger.info("ЕТАП: ПЕРЕВІРКА ЗАЛЕЖНОСТЕЙ")
     logger.info("═" * 60)
     
-    logger.info("\n📦 ОБОВ'ЯЗКОВІ ЗАЛЕЖНОСТІ:")
+    logger.info("📦 ОБОВ'ЯЗКОВІ ЗАЛЕЖНОСТІ:")
     missing_required = []
     
     for module, package in REQUIRED_LIBS.items():
@@ -173,7 +173,7 @@ def check_dependencies():
             logger.error(f"  ✗ {package} - ВІДСУТНІЙ")
             missing_required.append(package)
     
-    logger.info("\n📦 ОПЦІОНАЛЬНІ ЗАЛЕЖНОСТІ:")
+    logger.info("📦 ОПЦІОНАЛЬНІ ЗАЛЕЖНОСТІ:")
     for module, package in OPTIONAL_LIBS.items():
         try:
             __import__(module)
@@ -182,11 +182,11 @@ def check_dependencies():
             logger.warning(f"  ⚠ {package} - відсутній (буде використовуватись HTTP альтернатива)")
     
     if missing_required:
-        logger.error(f"\n❌ КРИТИЧНА ПОМИЛКА: Встановіть обов'язкові пакети:")
+        logger.error(f"❌ КРИТИЧНА ПОМИЛКА: Встановіть обов'язкові пакети:")
         logger.error(f"   pip install {' '.join(missing_required)}")
         sys.exit(1)
     
-    logger.info("\n✓ Всі обов'язкові залежності встановлені\n")
+    logger.info("✓ Всі обов'язкові залежності встановлені\n")
     return True
 
 
@@ -208,7 +208,15 @@ def load_config():
     
     import yaml
     
-    config_file = Path(__file__).parent / 'config.yaml'
+    # Визначаємо шлях до config.yaml
+    if getattr(sys, 'frozen', False):
+        # Якщо запущено як EXE
+        base_path = Path(sys.executable).parent
+    else:
+        # Якщо запущено як скрипт
+        base_path = Path(__file__).parent
+        
+    config_file = base_path / 'config.yaml'
     
     # Якщо файл відсутній — створюємо еталонний
     if not config_file.exists():
@@ -219,7 +227,7 @@ def load_config():
             with open(config_file, 'w', encoding='utf-8') as f:
                 yaml.dump(DEFAULT_CONFIG, f, allow_unicode=True, default_flow_style=False)
             logger.info(f"  ✓ config.yaml створена за адресою: {config_file}")
-            logger.info(f"\n  ⚠ УВАГА: Відредагуйте config.yaml перед повторним запуском!")
+            logger.info(f"  ⚠ УВАГА: Відредагуйте config.yaml перед повторним запуском!")
             sys.exit(0)
         except Exception as e:
             logger.error(f"  ❌ ПОМИЛКА при створенні config.yaml: {e}\n")
